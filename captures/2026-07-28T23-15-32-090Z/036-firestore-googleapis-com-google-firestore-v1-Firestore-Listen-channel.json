@@ -1,0 +1,7 @@
+{
+  "url": "https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?gsessionid=i7dCHy1n7iKSS0EyPDn9zVxZ8Wegx6hoZsu79YHDwKVYzACxAMzKcw&VER=8&database=projects%2Fcardladder-71d53%2Fdatabases%2F(default)&RID=rpc&SID=19MsR1ec6AgGWE1YQ3rrNw&AID=61&CI=0&TYPE=xmlhttp&zx=xix0eaq0kmg2&t=1",
+  "method": "GET",
+  "status": 200,
+  "requestBody": null,
+  "body": "15\n[[62,[\"noop\"]]]15\n[[63,[\"noop\"]]]105\n[[64,[{\n  \"targetChange\": {\n    \"targetChangeType\": \"REMOVE\",\n    \"targetIds\": [\n      16\n    ]\n  }\n}\n]]]102\n[[65,[{\n  \"targetChange\": {\n    \"targetChangeType\": \"ADD\",\n    \"targetIds\": [\n      18\n    ]\n  }\n}\n]]]192\n[[66,[{\n  \"targetChange\": {\n    \"targetChangeType\": \"CURRENT\",\n    \"targetIds\": [\n      18\n    ],\n    \"resumeToken\": \"CgkIqeql6sD2lQM=\",\n    \"readTime\": \"2026-07-28T23:18:08.911657Z\"\n  }\n}\n]]]122\n[[67,[{\n  \"targetChange\": {\n    \"resumeToken\": \"CgkIqeql6sD2lQM=\",\n    \"readTime\": \"2026-07-28T23:18:08.911657Z\"\n  }\n}\n]]]102\n[[68,[{\n  \"targetChange\": {\n    \"targetChangeType\": \"ADD\",\n    \"targetIds\": [\n      20\n    ]\n  }\n}\n]]]"
+}

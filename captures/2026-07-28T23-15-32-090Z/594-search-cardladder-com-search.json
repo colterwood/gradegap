@@ -1,0 +1,56 @@
+{
+  "url": "https://search.cardladder.com/search?index=listings&query=1985%20(Nike%2CPromo)%20Jordan%20SGC%20(10%2C98)%20-Pristine%20-GMA%20-SCD%20-GAI%20-CEX%20-FGS%20-PGI%20-CSA%20-KSA%20-EGS%20-AGS%20-BSG%20-CGC%20-CSG%20-HGA%20-TFA%20-PGA%20-AGA%20-DCS%20-CGI%20-ISA%20-DCS%20-PBI%20-RCG%20-SBC%20-DGA%20-TGA%20-WCG%20-CCG%20-Auto%20-Autos%20-Autograph%20-Autographs%20-Autographed%20-Signed%20-Signature%20-Signatures%20-Signing%20-Signings%20-DNA%20-JSA%20-BAS%20-COA%20-Worn%20-Jersey%20-Jerseys%20-JSY%20-Patch%20-Patches%20-Swatch%20-Swatches%20-Material%20-Materials%20-Relic%20-Relics%20-Fabric%20-Fabrics%20-Lot%20-Lots%20-Bonus%20-Extras%20-Extra%20-More%20-Also%20-Additional%20-Sealed%20-Unopened%20-Pick%20-Choose%20-Box%20-Boxes%20-Reprint%20-Reprints%20-RP%20-RPs%20-Reproduction%20-Reproductions%20-Repro%20-Repros%20-Replica%20-Full%20-Entire%20-Complete%20-Partial%20-(SGC%209.5)%20-(SGC%209)%20-(SGC%208.5)%20-(SGC%208)%20-(SGC%207.5)%20-(SGC%207)%20-(SGC%206.5)%20-(SGC%206)%20-(SGC%205.5)%20-(SGC%205)%20-(SGC%204.5)%20-(SGC%204)%20-(SGC%203.5)%20-(SGC%203)%20-(SGC%202.5)%20-(SGC%202)%20-(SGC%201.5)%20-(SGC%201)&limit=5&filters=endDate%3Agt%3Dnow&sort=watchers",
+  "method": "GET",
+  "status": 200,
+  "requestBody": null,
+  "body": {
+    "hits": [
+      {
+        "itemId": "fanatics-vault-21bd8cb6-b62c-4b76-b404-08376585f4ce",
+        "title": "1985 Nike Promo Michael Jordan SGC 10",
+        "url": "https://pwccmarketplace.pxf.io/c/4258433/1164956/14733?u=https%3A%2F%2Fwww.fanaticscollect.com%2Fbuy-now%2F21bd8cb6-b62c-4b76-b404-08376585f4ce",
+        "price": 11000,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2026-07-15T00:59:08.000Z",
+        "updatedDate": "2026-07-15T00:59:08.000Z",
+        "image": "https://cdn-vault.fanaticscollect.com/cdn.shopify.com/s/files/1/0884/5662/6493/files/medium/a16f6c5b-5181-46cf-a0d9-a2805baed683_f86561fc-449d-404e-9a84-5e03db1a4a5a.webp",
+        "platform": "Fanatics-Vault",
+        "listingType": "BestOffer",
+        "id": "fanatics-vault-21bd8cb6-b62c-4b76-b404-08376585f4ce",
+        "hitScore": null,
+        "hitIndex": "listings"
+      },
+      {
+        "itemId": "fanatics-vault-ae40f341-deb5-486e-b9ac-7acaecca7154",
+        "title": "1985 Nike Promo Michael Jordan SGC 10 GEM MINT",
+        "url": "https://pwccmarketplace.pxf.io/c/4258433/1164956/14733?u=https%3A%2F%2Fwww.fanaticscollect.com%2Fbuy-now%2Fae40f341-deb5-486e-b9ac-7acaecca7154",
+        "price": 24999,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2026-07-06T19:03:00.000Z",
+        "updatedDate": "2026-07-29T00:06:24.000Z",
+        "image": "https://cdn-vault.fanaticscollect.com/2026/6/25/rh1/medium/v5138662_20260625091235530M_1.jpg",
+        "platform": "Fanatics-Vault",
+        "listingType": "FixedPrice",
+        "id": "fanatics-vault-ae40f341-deb5-486e-b9ac-7acaecca7154",
+        "hitScore": null,
+        "hitIndex": "listings"
+      },
+      {
+        "itemId": "fanatics-vault-f9b0c6e8-d985-43ad-8310-9e7f19deaf6b",
+        "title": "1985 Nike Promo Michael Jordan SGC 10",
+        "url": "https://pwccmarketplace.pxf.io/c/4258433/1164956/14733?u=https%3A%2F%2Fwww.fanaticscollect.com%2Fbuy-now%2Ff9b0c6e8-d985-43ad-8310-9e7f19deaf6b",
+        "price": 14000,
+        "endDate": "3000-02-01T07:00:00.000Z",
+        "createdDate": "2026-04-23T01:04:40.000Z",
+        "updatedDate": "2026-05-06T22:37:23.000Z",
+        "image": "https://cdn-vault.fanaticscollect.com/cdn.shopify.com/s/files/1/0884/5662/6493/files/medium/a16f6c5b-5181-46cf-a0d9-a2805baed683_d928a613-15ef-49b8-bd91-4b7de13998c0.webp",
+        "platform": "Fanatics-Vault",
+        "listingType": "BestOffer",
+        "id": "fanatics-vault-f9b0c6e8-d985-43ad-8310-9e7f19deaf6b",
+        "hitScore": null,
+        "hitIndex": "listings"
+      }
+    ],
+    "totalHits": 3
+  }
+}

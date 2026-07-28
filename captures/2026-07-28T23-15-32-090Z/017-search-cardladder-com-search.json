@@ -1,0 +1,75 @@
+{
+  "url": "https://search.cardladder.com/search?index=listings&query=&limit=4&filters=endDate%3Agt%3Dnow&sort=createdDate&direction=asc",
+  "method": "GET",
+  "status": 200,
+  "requestBody": null,
+  "body": {
+    "hits": [
+      {
+        "itemId": "myslabs-1621",
+        "title": "2012 Bryce Harper BGS 10 Topps Update Gold Sparkle POP 6 RC",
+        "url": "https://myslabs.pxf.io/c/4258433/1660950/19288?u=https%3A%2F%2Fmyslabs.com%2Fslab%2Fview%2F1621%2F",
+        "price": 5000,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2019-04-24T00:00:00.000Z",
+        "updatedDate": "2026-07-28T18:58:27.826Z",
+        "image": "https://cdn.myslabs.com/myslabs-prod/media/AKHNEML_1561867776_front.jpeg",
+        "thumbnail": "https://cdn.myslabs.com/myslabs-prod/media/AKHNEML_1561867776_front.jpeg",
+        "platform": "MySlabs",
+        "listingType": "BestOffer",
+        "id": "myslabs-1621",
+        "hitScore": null,
+        "hitIndex": "listings"
+      },
+      {
+        "itemId": "myslabs-2655",
+        "title": "2016 Bowman Chrome Draft AutoGavin Lux BGS 9.5",
+        "url": "https://myslabs.pxf.io/c/4258433/1660950/19288?u=https%3A%2F%2Fmyslabs.com%2Fslab%2Fview%2F2655%2F",
+        "price": 700,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2019-06-22T00:00:00.000Z",
+        "updatedDate": "2026-07-28T19:24:10.382Z",
+        "image": "https://cdn.myslabs.com/myslabs-prod/media/VOHZZZY_1561863694_front.jpeg",
+        "thumbnail": "https://cdn.myslabs.com/myslabs-prod/media/VOHZZZY_1561863694_front.jpeg",
+        "platform": "MySlabs",
+        "listingType": "BestOffer",
+        "id": "myslabs-2655",
+        "hitScore": null,
+        "hitIndex": "listings"
+      },
+      {
+        "itemId": "myslabs-2670",
+        "title": "2012 Bowman Chrome Auto Corey Seager PSA 10",
+        "url": "https://myslabs.pxf.io/c/4258433/1660950/19288?u=https%3A%2F%2Fmyslabs.com%2Fslab%2Fview%2F2670%2F",
+        "price": 1000,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2019-06-23T00:00:00.000Z",
+        "updatedDate": "2026-07-28T18:18:49.322Z",
+        "image": "https://cdn.myslabs.com/myslabs-prod/media/GHONBHS_1561863585_front.jpeg",
+        "thumbnail": "https://cdn.myslabs.com/myslabs-prod/media/GHONBHS_1561863585_front.jpeg",
+        "platform": "MySlabs",
+        "listingType": "BestOffer",
+        "id": "myslabs-2670",
+        "hitScore": null,
+        "hitIndex": "listings"
+      },
+      {
+        "itemId": "myslabs-5871",
+        "title": "2018 Bowman Chrome Gold Refractor Auto Thairo Estrada RC PSA 9",
+        "url": "https://myslabs.pxf.io/c/4258433/1660950/19288?u=https%3A%2F%2Fmyslabs.com%2Fslab%2Fview%2F5871%2F",
+        "price": 75,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2019-09-15T00:00:00.000Z",
+        "updatedDate": "2026-07-28T17:29:11.215Z",
+        "image": "https://cdn.myslabs.com/myslabs-prod/media/IBXOZAX_1568573356_front.jpeg",
+        "thumbnail": "https://cdn.myslabs.com/myslabs-prod/media/IBXOZAX_1568573356_front.jpeg",
+        "platform": "MySlabs",
+        "listingType": "BestOffer",
+        "id": "myslabs-5871",
+        "hitScore": null,
+        "hitIndex": "listings"
+      }
+    ],
+    "totalHits": 10000
+  }
+}

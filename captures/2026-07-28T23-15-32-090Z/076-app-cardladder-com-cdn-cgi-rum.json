@@ -1,0 +1,7 @@
+{
+  "url": "https://app.cardladder.com/cdn-cgi/rum?",
+  "method": "POST",
+  "status": 204,
+  "requestBody": "{\"resources\":[],\"referrer\":\"https://app.cardladder.com/ladder\",\"eventType\":1,\"firstPaint\":2840,\"firstContentfulPaint\":2840,\"startTime\":1785280532105,\"versions\":{\"fl\":\"2024.11.0\",\"js\":\"2026.6.0\",\"timings\":1},\"pageloadId\":\"e1da5853-ef00-4da0-9b92-f996dec7c671\",\"location\":\"https://app.cardladder.com/ladder\",\"nt\":\"navigate\",\"timingsV2\":{\"nextHopProtocol\":\"h2\",\"transferSize\":1540,\"decodedBodySize\":2402},\"dt\":\"\",\"siteToken\":\"18b8a8f3df4147faa9728165704afa74\",\"st\":2}",
+  "body": ""
+}

@@ -1,0 +1,57 @@
+{
+  "url": "https://search.cardladder.com/search?index=listings&query=1989%20Topps%20Traded%20Ken%20Griffey%20SGC%2010%20-BCCG%20-GMA%20-PRO%20-9.5%20-9%20-8.5%20-8%20-7.5%20-7%20-6.5%20-6%20-5%20-4%20-3%20-2%20-1%20-Lot%20-Box%20-Boxes%20-Pack%20-Packs%20-Set%20-Break%20-And%20-Bowman%20-Could%20-Possible%20-Johnson%20-Score%20-100T%20-Tiffany%20-Gold%20-Pristine%20-Auto%20-Autograph%20-Autographs%20-Autographed%20-Signed%20-Signature%20-Signatures%20-96%20&limit=5&filters=endDate%3Agt%3Dnow&sort=watchers",
+  "method": "GET",
+  "status": 200,
+  "requestBody": null,
+  "body": {
+    "hits": [
+      {
+        "itemId": "fanatics-vault-ada3ddfb-da5d-42fb-88fe-ffeb3711c05a",
+        "title": "1989 Topps Traded Ken Griffey Jr. ROOKIE #41T SGC 10 GEM MINT",
+        "url": "https://pwccmarketplace.pxf.io/c/4258433/1164956/14733?u=https%3A%2F%2Fwww.fanaticscollect.com%2Fbuy-now%2Fada3ddfb-da5d-42fb-88fe-ffeb3711c05a",
+        "price": 800,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2025-10-18T07:02:22.000Z",
+        "updatedDate": "2026-07-28T13:34:21.000Z",
+        "image": "https://cdn-vault.fanaticscollect.com/2021/7/14/1/medium/v189341_2021071410323233M_25.jpg",
+        "platform": "Fanatics-Vault",
+        "listingType": "BestOffer",
+        "id": "fanatics-vault-ada3ddfb-da5d-42fb-88fe-ffeb3711c05a",
+        "hitScore": null,
+        "hitIndex": "listings"
+      },
+      {
+        "itemId": "fanatics-vault-e90b43a1-cf01-4bd6-a2eb-980118d72976",
+        "title": "1989 Topps Traded Ken Griffey Jr. ROOKIE #41T SGC 10 GEM MINT",
+        "url": "https://pwccmarketplace.pxf.io/c/4258433/1164956/14733?u=https%3A%2F%2Fwww.fanaticscollect.com%2Fbuy-now%2Fe90b43a1-cf01-4bd6-a2eb-980118d72976",
+        "price": 227,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2026-07-21T04:46:06.000Z",
+        "updatedDate": "2026-07-28T13:35:05.000Z",
+        "image": "https://cdn-vault.fanaticscollect.com/2025/9/10/bs3/medium/v1569288_20250910160217489M_3.jpg",
+        "platform": "Fanatics-Vault",
+        "listingType": "FixedPrice",
+        "id": "fanatics-vault-e90b43a1-cf01-4bd6-a2eb-980118d72976",
+        "hitScore": null,
+        "hitIndex": "listings"
+      },
+      {
+        "itemId": "myslabs-1646386",
+        "title": "1989 Topps Traded Ken Griffey JR. #41T SGC 10",
+        "url": "https://myslabs.pxf.io/c/4258433/1660950/19288?u=https%3A%2F%2Fmyslabs.com%2Fslab%2Fview%2F1646386%2F",
+        "price": 207.08,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2026-06-27T00:00:00.000Z",
+        "updatedDate": "2026-07-27T14:28:18.923Z",
+        "image": "https://cdn.myslabs.com/myslabs-prod/media/EEPSGFF_1782604976_1.png",
+        "thumbnail": "https://cdn.myslabs.com/myslabs-prod/media/EEPSGFF_1782604976_1.png",
+        "platform": "MySlabs",
+        "listingType": "BestOffer",
+        "id": "myslabs-1646386",
+        "hitScore": null,
+        "hitIndex": "listings"
+      }
+    ],
+    "totalHits": 3
+  }
+}

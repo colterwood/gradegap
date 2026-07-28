@@ -1,0 +1,41 @@
+{
+  "url": "https://search.cardladder.com/search?index=listings&query=1971%20Topps%20George%20Foster%20(davidson%2Cdavison%2C276)%20-Graded%20-PSA%20-Beckett%20-BGS%20-BVG%20-BCCG%20-RCR%20-SGC%20-HGA%20-CSG%20-CGC%20-GMA%20-SCD%20-GAI%20-CEX%20-FGS%20-PGI%20-CSA%20-CGA%20-KSA%20-EGS%20-AGS%20-BSG%20-TFA%20-PGA%20-AGA%20-DCS%20-CGI%20-ISA%20-PBI%20-RCG%20-SBC%20-DGA%20-TGA%20-WCG%20-DSG%20-VGT%20-PCA%20-MGC%20-AGC%20-PGS%20-FCG%20-Review%20-DCS%20-CGS%20-BGN%20-Auto%20-Autos%20-Autograph%20-Autographs%20-Autographed%20-Signed%20-Signature%20-Signatures%20-Signing%20-Signings%20-DNA%20-JSA%20-BAS%20-COA%20-Worn%20-Jersey%20-Jerseys%20-Patch%20-Patches%20-Swatch%20-Swatches%20-Material%20-Materials%20-Relic%20-Relics%20-Fabric%20-Fabrics%20-Lot%20-Lots%20-Bonus%20-Extras%20-Extra%20-More%20-Also%20-Additional%20-Plus%20-And%20-Sealed%20-Unopened%20-Box%20-Boxes%20-Pick%20-Choose%20-Reprint%20-Reprints%20-RP%20-RPs%20-Reproduction%20-Reproductions%20-Repro%20-Repros%20-Replica%20-Full%20-Entire%20-Complete%20-Partial%20-MC%20-MK%20-OC%20-PD%20-ST%20-Cello%20-Wax%20-Postcards%20-Postcard%20-Post%20-Stub%20-Stubs%20-Ticket%20-Tickets%20-record%20-breaker&limit=5&filters=endDate%3Agt%3Dnow&sort=watchers",
+  "method": "GET",
+  "status": 200,
+  "requestBody": null,
+  "body": {
+    "hits": [
+      {
+        "itemId": "fanatics-vault-3c8ee892-ca35-43e6-996a-55d55742638d",
+        "title": "Mike Davidson/George Foster Rookie Card 1971 Topps #276",
+        "url": "https://pwccmarketplace.pxf.io/c/4258433/1164956/14733?u=https%3A%2F%2Fwww.fanaticscollect.com%2Fbuy-now%2F3c8ee892-ca35-43e6-996a-55d55742638d",
+        "price": 100,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2026-06-24T04:08:32.000Z",
+        "updatedDate": "2026-07-03T00:11:24.000Z",
+        "image": "https://cdn-vault.fanaticscollect.com/cdn.shopify.com/s/files/1/0622/2574/4110/products/medium/0000450316_d8a2163b-5c60-4c7e-87a8-050362dd7437.webp",
+        "platform": "Fanatics-Vault",
+        "listingType": "FixedPrice",
+        "id": "fanatics-vault-3c8ee892-ca35-43e6-996a-55d55742638d",
+        "hitScore": null,
+        "hitIndex": "listings"
+      },
+      {
+        "itemId": "fanatics-vault-55edbb9d-5571-4c07-9d45-6e77c22ee370",
+        "title": "Rookie Stars/Mike Davison RC/George Foster Rookie Card 1971 Topps #276",
+        "url": "https://pwccmarketplace.pxf.io/c/4258433/1164956/14733?u=https%3A%2F%2Fwww.fanaticscollect.com%2Fbuy-now%2F55edbb9d-5571-4c07-9d45-6e77c22ee370",
+        "price": 30,
+        "endDate": "3000-02-01T00:00:00.000Z",
+        "createdDate": "2026-06-24T04:11:57.000Z",
+        "updatedDate": "2026-06-24T04:11:57.000Z",
+        "image": "https://cdn-vault.fanaticscollect.com/cdn.shopify.com/s/files/1/0622/2574/4110/files/medium/0000625395_8a40ce06-8d8c-4f27-97ce-f8d292b2419d.webp",
+        "platform": "Fanatics-Vault",
+        "listingType": "BestOffer",
+        "id": "fanatics-vault-55edbb9d-5571-4c07-9d45-6e77c22ee370",
+        "hitScore": null,
+        "hitIndex": "listings"
+      }
+    ],
+    "totalHits": 2
+  }
+}

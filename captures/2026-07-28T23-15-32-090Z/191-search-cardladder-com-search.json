@@ -1,0 +1,10 @@
+{
+  "url": "https://search.cardladder.com/search?index=listings&query=1986%20fleer%20michael%20jordan%20SGC%209%20-8.5%20-8%20-7.5%20-7%20-6.5%20-6%20-5.5%20-5%20-4.5%20-4%20-3.5%20-3%20-2.5%20-2%20-bleachers%20-gold%20-23k%20-1985%20-nike%20-bccg%20-gma%20-gai%20-pcg%20-csa%20-pro%20-box%20-pack%20-lot%20-plus%20-bonus%20-extras%20-and%20-set%20-sticker%20-2006%20-anniversary%20-1996%20-decade%20-excellence%20-stickers%20-star%20-2007%20-used%20-1984&limit=5&filters=endDate%3Agt%3Dnow&sort=watchers",
+  "method": "GET",
+  "status": 200,
+  "requestBody": null,
+  "body": {
+    "hits": [],
+    "totalHits": 0
+  }
+}

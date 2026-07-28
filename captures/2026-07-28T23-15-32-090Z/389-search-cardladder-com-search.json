@@ -1,0 +1,29 @@
+{
+  "url": "https://search.cardladder.com/search?index=listings&query=(2004%2C04)%20Lionel%20Messi%2035%20-Graded%20-PSA%20-Beckett%20-BGS%20-BVG%20-BCCG%20-RCR%20-Review%20-SGC%20-GMA%20-SCD%20-GAI%20-CEX%20-FGS%20-PGI%20-CSA%20-KSA%20-EGS%20-AGS%20-BSG%20-CGC%20-CSG%20-HGA%20-TFA%20-PGA%20-AGA%20-DCS%20-CGI%20-ISA%20-DCS%20-PBI%20-RCG%20-Auto%20-Autos%20-Autograph%20-Autographs%20-Autographed%20-Signed%20-Signature%20-Signatures%20-Signing%20-Signings%20-DNA%20-JSA%20-BAS%20-COA%20-Worn%20-Jersey%20-Jerseys%20-Patch%20-Patches%20-Swatch%20-Swatches%20-Material%20-Materials%20-Relic%20-Relics%20-Lot%20-Lots%20-Bonus%20-Extras%20-Extra%20-More%20-Also%20-Additional%20-Plus%20-And%20-Sealed%20-Unopened%20-Box%20-Boxes%20-Pick%20-Choose%20-Reprint%20-Reprints%20-RP%20-RPs%20-Reproduction%20-Reproductions%20-Repro%20-Repros%20-Replica%20-Full%20-Entire%20-Complete%20-Partial%20-10%20-9.5%20-9%20-8.5%20-8%20-7.5%20-7%20-6.5%20-6%20-5.5%20-5%20-4.5%20-4%20-3.5%20-3%20-2.5%20-2%20-1.5%20-MC%20-MK%20-OC%20-PD%20-Campio%20-Catalan%20-62%20-89&limit=5&filters=endDate%3Agt%3Dnow&sort=watchers",
+  "method": "GET",
+  "status": 200,
+  "requestBody": null,
+  "body": {
+    "hits": [
+      {
+        "itemId": "ebay-287480346699",
+        "url": "https://www.ebay.com/itm/287480346699?mkcid=1&mkrid=711-53200-19255-0&siteid=0&customid=&toolid=10001&mkevt=1&campid=5339032677",
+        "platform": "eBay",
+        "listingType": "Auction",
+        "price": 405,
+        "image": "https://i.ebayimg.com/images/g/C0IAAeSw~LpqX6JK/s-l1600.webp",
+        "thumbnail": "https://i.ebayimg.com/images/g/C0IAAeSw~LpqX6JK/s-l400.webp",
+        "endDate": "2026-07-30T21:22:59.000Z",
+        "title": "2004-05 Panini Megacracks Barca Campeon - Lionel Messi #35 Spanish (RC)",
+        "watchers": 52,
+        "bids": 11,
+        "seller": "alejbibbi-0",
+        "feedback": 2,
+        "id": "ebay-287480346699",
+        "hitScore": null,
+        "hitIndex": "listings"
+      }
+    ],
+    "totalHits": 1
+  }
+}

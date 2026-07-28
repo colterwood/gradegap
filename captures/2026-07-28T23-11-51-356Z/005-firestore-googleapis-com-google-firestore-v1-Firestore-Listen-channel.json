@@ -1,0 +1,7 @@
+{
+  "url": "https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fcardladder-71d53%2Fdatabases%2F(default)&gsessionid=BfaxrLDzTI36w4DxOfYkT7I0eacJBRDY2vTp3fWvC4hdLSdqV_-ZMg&SID=Xt-dEDm5zJgiK2nZTTPecw&RID=23472&AID=9&zx=9y7owybhaf89&t=1",
+  "method": "POST",
+  "status": 200,
+  "requestBody": "count=1&ofs=3&req0___data__=%7B%22database%22%3A%22projects%2Fcardladder-71d53%2Fdatabases%2F(default)%22%2C%22removeTarget%22%3A4%7D",
+  "body": "8\n[1,9,7]\n"
+}
