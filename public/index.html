@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GradeGap — SGC 10 vs PSA 10</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>" />
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>GradeGap</h1>
+      <span class="subtitle">SGC 10 vs PSA 10 price disparity</span>
+    </div>
+    <div class="sync">
+      <span id="sync-info" class="sync-info"></span>
+      <button id="resume-btn" class="secondary" hidden>Resume interrupted sync</button>
+      <button id="sync-btn">Sync</button>
+      <button id="cancel-btn" class="secondary" hidden>Cancel</button>
+    </div>
+  </header>
+
+  <div id="progress" class="progress" hidden>
+    <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+    <span id="progress-text"></span>
+  </div>
+
+  <div id="error-banner" class="error-banner" hidden></div>
+
+  <section class="controls">
+    <div class="control">
+      <label>Price basis</label>
+      <div class="toggle" id="basis-toggle">
+        <button data-value="cl_value" class="active">CL Value</button>
+        <button data-value="last_sale">Last Sale</button>
+      </div>
+    </div>
+    <div class="control">
+      <label>Sort by</label>
+      <div class="toggle" id="sort-toggle">
+        <button data-value="pct" class="active">% Diff</button>
+        <button data-value="abs">$ Diff</button>
+      </div>
+    </div>
+    <div class="control">
+      <label for="direction">Direction</label>
+      <select id="direction">
+        <option value="all">Both directions</option>
+        <option value="sgc_cheaper">SGC 10 cheaper</option>
+        <option value="psa_cheaper">PSA 10 cheaper</option>
+      </select>
+    </div>
+    <div class="control">
+      <label for="min-price">Min price ($)</label>
+      <input type="number" id="min-price" min="0" step="50" value="0" />
+    </div>
+    <div class="control">
+      <label for="player">Player</label>
+      <select id="player"><option value="">All players</option></select>
+    </div>
+  </section>
+
+  <main>
+    <p id="summary" class="summary"></p>
+    <table id="results">
+      <thead>
+        <tr>
+          <th>Card</th>
+          <th class="num">SGC 10</th>
+          <th class="num">PSA 10</th>
+          <th class="num">$ Diff</th>
+          <th class="num">% Diff</th>
+          <th>SGC last sale</th>
+          <th>PSA last sale</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p id="empty" class="empty" hidden>No results yet — hit <strong>Sync</strong> to pull data from Card Ladder.</p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+{
+  "mj-1986-fleer-57": [
+    { "company": "SGC", "grade": "10", "clValue": 24500, "lastSalePrice": 23800, "lastSaleDate": "2026-07-10" },
+    { "company": "PSA", "grade": "10", "clValue": 175000, "lastSalePrice": 168000, "lastSaleDate": "2026-06-28" },
+    { "company": "PSA", "grade": "9", "clValue": 24000, "lastSalePrice": 23500, "lastSaleDate": "2026-07-14" }
+  ],
+  "mj-1986-fleer-sticker-8": [
+    { "company": "SGC", "grade": "10", "clValue": 7200, "lastSalePrice": 6900, "lastSaleDate": "2026-06-02" },
+    { "company": "PSA", "grade": "10", "clValue": 33000, "lastSalePrice": 34500, "lastSaleDate": "2026-07-01" }
+  ],
+  "mj-1987-fleer-59": [
+    { "company": "SGC", "grade": "10", "clValue": 3900, "lastSalePrice": 4100, "lastSaleDate": "2026-07-18" },
+    { "company": "PSA", "grade": "10", "clValue": 14800, "lastSalePrice": 14200, "lastSaleDate": "2026-07-05" }
+  ],
+  "mj-1988-fleer-17": [
+    { "company": "SGC", "grade": "10", "clValue": 1450, "lastSalePrice": 1390, "lastSaleDate": "2026-07-21" },
+    { "company": "PSA", "grade": "10", "clValue": 5100, "lastSalePrice": 5350, "lastSaleDate": "2026-07-12" }
+  ],
+  "mj-1989-hoops-200": [
+    { "company": "SGC", "grade": "10", "clValue": 340, "lastSalePrice": 355, "lastSaleDate": "2026-07-19" },
+    { "company": "PSA", "grade": "10", "clValue": 900, "lastSalePrice": 875, "lastSaleDate": "2026-07-16" }
+  ],
+  "mj-1990-skybox-41": [
+    { "company": "SGC", "grade": "10", "clValue": 210, "lastSalePrice": 205, "lastSaleDate": "2026-07-08" },
+    { "company": "PSA", "grade": "10", "clValue": 380, "lastSalePrice": null, "lastSaleDate": null }
+  ],
+  "mj-1991-ud-44": [
+    { "company": "PSA", "grade": "10", "clValue": 320, "lastSalePrice": 310, "lastSaleDate": "2026-07-11" }
+  ],
+  "mj-1992-ud-23": [
+    { "company": "SGC", "grade": "10", "clValue": 145, "lastSalePrice": 150, "lastSaleDate": "2026-07-22" },
+    { "company": "PSA", "grade": "10", "clValue": 260, "lastSalePrice": 255, "lastSaleDate": "2026-07-15" }
+  ],
+  "mj-1993-finest-1": [
+    { "company": "SGC", "grade": "10", "clValue": 1250, "lastSalePrice": 1300, "lastSaleDate": "2026-06-30" },
+    { "company": "PSA", "grade": "10", "clValue": 2900, "lastSalePrice": 2750, "lastSaleDate": "2026-07-09" }
+  ],
+  "mj-1996-topps-chrome-139": [
+    { "company": "SGC", "grade": "10", "clValue": 2100, "lastSalePrice": 2050, "lastSaleDate": "2026-07-17" },
+    { "company": "PSA", "grade": "10", "clValue": 6800, "lastSalePrice": 7100, "lastSaleDate": "2026-07-13" }
+  ],
+  "mj-1996-topps-chrome-139-refractor": [
+    { "company": "SGC", "grade": "10", "clValue": 41000, "lastSalePrice": null, "lastSaleDate": null },
+    { "company": "PSA", "grade": "10", "clValue": 155000, "lastSalePrice": 149000, "lastSaleDate": "2026-05-20" }
+  ],
+  "mj-1997-metal-universe-23": [
+    { "company": "SGC", "grade": "10", "clValue": 5200, "lastSalePrice": 5450, "lastSaleDate": "2026-07-20" },
+    { "company": "PSA", "grade": "10", "clValue": 4300, "lastSalePrice": 4150, "lastSaleDate": "2026-07-18" }
+  ],
+  "mj-1997-ud-diamond-vision-1": [
+    { "company": "SGC", "grade": "10", "clValue": 880, "lastSalePrice": 860, "lastSaleDate": "2026-07-03" },
+    { "company": "PSA", "grade": "10", "clValue": 640, "lastSalePrice": 655, "lastSaleDate": "2026-07-07" }
+  ],
+  "mj-1998-topps-77": [
+    { "company": "SGC", "grade": "10", "clValue": 95, "lastSalePrice": 90, "lastSaleDate": "2026-07-23" },
+    { "company": "PSA", "grade": "10", "clValue": 210, "lastSalePrice": 220, "lastSaleDate": "2026-07-21" }
+  ],
+  "mj-2003-ud-mvp-1": [
+    { "company": "SGC", "grade": "10", "clValue": 60, "lastSalePrice": 58, "lastSaleDate": "2026-07-24" }
+  ]
+}

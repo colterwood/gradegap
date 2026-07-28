@@ -1,0 +1,23 @@
+{
+  "name": "gradegap",
+  "version": "0.1.0",
+  "description": "Local web app that finds cards with the biggest SGC 10 vs PSA 10 price disparity using Card Ladder data",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "mock": "node src/server.js --mock",
+    "login": "node scripts/login.js",
+    "discover": "node scripts/discover.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "playwright": "^1.49.0"
+  }
+}
