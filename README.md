@@ -33,8 +33,12 @@ cp .env.example .env        # defaults are fine; nothing is required
 ## First run
 
 ```bash
-# 1. Log in once. A browser window opens — sign in to Card Ladder yourself
-#    (including any 2FA). The session is saved locally in ./profile.
+# 1. Log in once. A browser window opens — sign in to Card Ladder yourself,
+#    with whatever method your account actually uses (email/password,
+#    "Sign in with Apple", 2FA, etc). The session is saved locally in
+#    ./profile. If you ever log in with the wrong account by mistake, delete
+#    the ./profile folder and run this again — otherwise it keeps reusing
+#    the saved (wrong) session instead of prompting you to log in.
 npm run login
 
 # 2. IMPORTANT — discovery run. Card Ladder's internal API is undocumented,
