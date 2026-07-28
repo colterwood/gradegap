@@ -11,6 +11,14 @@ function intEnv(name, fallback) {
   return Number.isFinite(v) ? v : fallback;
 }
 
+// The two conditions being compared. SGC's numeric 10 comes in two flavors —
+// "10 Gem Mint" and the rarer "10 Pristine". The adapter normalizes Pristine
+// to grade '10 PRI', so grade '10' here always means Gem Mint.
+export const TARGETS = {
+  sgc: { company: 'SGC', grade: '10', label: 'SGC 10 Gem Mint' },
+  psa: { company: 'PSA', grade: '10', label: 'PSA 10 Gem Mint' },
+};
+
 export const config = {
   port: intEnv('PORT', 4000),
   headless: process.env.HEADLESS === 'true',

@@ -12,6 +12,11 @@ export async function goToApp(page) {
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
 }
 
+export async function goToLadder(page) {
+  await page.goto(`${APP_URL}/ladder`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+}
+
 export async function searchPlayer(page, searchTerm) {
   const searchBox = page
     .locator('input[type="search"], input[placeholder*="earch" i], [role="searchbox"]')

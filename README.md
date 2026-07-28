@@ -1,8 +1,9 @@
 # GradeGap
 
 A personal, local-only web app that finds sports cards with the biggest price
-disparity between their **SGC 10** and **PSA 10** grades, using data from your
-own [Card Ladder](https://app.cardladder.com) account.
+disparity between their **SGC 10 Gem Mint** and **PSA 10** grades, using data
+from your own [Card Ladder](https://app.cardladder.com) account. (SGC's rarer
+"10 Pristine" is deliberately excluded from the comparison.)
 
 Everything runs on your computer. Your Card Ladder login happens in a real
 browser window on your machine; your password is never stored (unless you opt
@@ -42,22 +43,23 @@ cp .env.example .env        # defaults are fine; nothing is required
 npm run login
 
 # 2. IMPORTANT — discovery run. Card Ladder's internal API is undocumented,
-#    so the first task is to capture what its pages actually load:
+#    so the first task is to capture the API behind "the Ladder":
 npm run discover
 ```
 
-Discovery opens Card Ladder and walks the Michael Jordan pages, recording all
-backend traffic to `captures/<timestamp>/`. Browse around yourself too — open
-the player page and a few cards, look at PSA 10 and SGC 10 prices — then hit
-Ctrl-C in the terminal.
+Discovery opens the Ladder (Card Ladder's grade-filterable ranked list) and
+records all backend traffic to `captures/<timestamp>/` while you browse. The
+terminal walks you through it: filter Condition → **SGC 10 - Gem Mint**, page
+through a few pages, switch the filter to **PSA 10**, page through again, and
+optionally open one card and flip its condition selector. Then Ctrl-C.
 
-> **Why discovery matters:** the parsers in
-> `src/scraper/cardladder/adapter.js` were written against *predicted*
-> response shapes (plain JSON, Firestore, Algolia). They're heuristic and may
-> work as-is — but if a sync finds 0 cards or 0 prices, the raw payloads land
-> in `captures/failures/` and the capture files from discovery are exactly
-> what's needed to fix the matchers in `endpoints.js` and `adapter.js`.
-> That finalization is a one-time step.
+> **Why discovery matters:** the Ladder's bulk list API is what makes this
+> scale — pulling whole grade-filtered pages of cards-with-values at once
+> instead of visiting every card page individually. The capture pins down
+> that endpoint's real URL, response shape, and pagination so the sync can be
+> bound to it in `src/scraper/cardladder/endpoints.js` and `adapter.js`.
+> That finalization is a one-time step; captures contain no passwords or
+> tokens (auth traffic is skipped and header values are redacted).
 
 ```bash
 # 3. Run the app

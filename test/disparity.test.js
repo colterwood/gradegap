@@ -87,6 +87,17 @@ test('min price filter uses the higher of the two prices', () => {
   assert.equal(r.excludedMissingGrade, 1);
 });
 
+test('SGC 10 Pristine rows never enter the Gem Mint comparison', () => {
+  const { q } = seedDb();
+  const cardId = q.getCardByClId.get('c1').id;
+  // a Pristine 10 worth 20x the Gem Mint 10 — must not change the comparison
+  q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10 PRI', clValue: 20000, lastSalePrice: 19500, lastSaleDate: '2026-07-01', syncRunId: null });
+  const r = q.resultsQuery(base);
+  const c1 = r.rows.find((x) => x.name === '1986 Fleer #57');
+  assert.equal(c1.sgc_price, 1000);
+  assert.equal(c1.pct_diff, 400);
+});
+
 test('upsert replaces prices instead of duplicating', () => {
   const { q } = seedDb();
   const cardId = q.getCardByClId.get('c1').id;

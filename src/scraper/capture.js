@@ -18,9 +18,39 @@ const CANDIDATE_HOSTS = [
 // Never persist auth material.
 const SKIP_HOSTS = ['identitytoolkit.googleapis.com', 'securetoken.googleapis.com'];
 
-function isCandidate(url) {
+// Analytics/telemetry — noise in discovery captures.
+const NOISE_HOSTS = [
+  'google-analytics.com', 'googletagmanager.com', 'doubleclick.net',
+  'sentry.io', 'intercom.io', 'segment.com', 'segment.io', 'stripe.com',
+  'hotjar.com', 'clarity.ms', 'datadoghq.com', 'launchdarkly.com',
+  'mixpanel.com', 'amplitude.com', 'fullstory.com', 'posthog.com',
+  'cloudflareinsights.com', 'facebook.com', 'facebook.net',
+];
+
+// In discovery mode capture EVERY non-auth, non-analytics response so the
+// real backend is guaranteed to be in the capture, whatever it turns out to
+// be. During normal syncs, only watch the known candidate hosts.
+function isCandidate(url, discovery) {
   if (SKIP_HOSTS.some((h) => url.includes(h))) return false;
+  if (discovery) return !NOISE_HOSTS.some((h) => url.includes(h));
   return CANDIDATE_HOSTS.some((h) => url.includes(h));
+}
+
+// Request-header VALUES are recorded only for these known-non-secret headers;
+// everything else (authorization, cookie, api keys, …) is name-only.
+const SAFE_HEADER_VALUES = new Set([
+  'content-type', 'accept', 'x-algolia-agent', 'x-algolia-application-id',
+  'x-firebase-gmpid', 'referer', 'origin',
+]);
+
+function describeHeaders(headers) {
+  const out = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const key = name.toLowerCase();
+    if (key.startsWith(':')) continue;
+    out[key] = SAFE_HEADER_VALUES.has(key) ? value : `<redacted ${value.length} chars>`;
+  }
+  return out;
 }
 
 const slug = (s) => s.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 80);
@@ -40,7 +70,7 @@ export function attachCapture(context, { discovery = config.discovery, onPayload
 
   context.on('response', async (response) => {
     const url = response.url();
-    if (!isCandidate(url)) return;
+    if (!isCandidate(url, discovery)) return;
     const request = response.request();
     if (!['xhr', 'fetch'].includes(request.resourceType())) return;
 
@@ -57,6 +87,7 @@ export function attachCapture(context, { discovery = config.discovery, onPayload
       url,
       method: request.method(),
       status: response.status(),
+      requestHeaders: describeHeaders(request.headers()),
       requestBody: request.postData() ?? null,
       json,
       text,
@@ -73,7 +104,7 @@ export function attachCapture(context, { discovery = config.discovery, onPayload
       const file = `${n}-${slug(u.host)}-${slug(u.pathname)}.json`;
       writeFileSync(
         path.join(dir, file),
-        JSON.stringify({ url, method: entry.method, status: entry.status, requestBody: entry.requestBody, body: json ?? text }, null, 2)
+        JSON.stringify({ url, method: entry.method, status: entry.status, requestHeaders: entry.requestHeaders, requestBody: entry.requestBody, body: json ?? text }, null, 2)
       );
       appendFileSync(
         path.join(dir, 'index.jsonl'),

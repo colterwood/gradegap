@@ -1,6 +1,7 @@
 {
   "mj-1986-fleer-57": [
     { "company": "SGC", "grade": "10", "clValue": 24500, "lastSalePrice": 23800, "lastSaleDate": "2026-07-10" },
+    { "company": "SGC", "grade": "10 PRI", "clValue": 120000, "lastSalePrice": 115000, "lastSaleDate": "2026-05-15" },
     { "company": "PSA", "grade": "10", "clValue": 175000, "lastSalePrice": 168000, "lastSaleDate": "2026-06-28" },
     { "company": "PSA", "grade": "9", "clValue": 24000, "lastSalePrice": 23500, "lastSaleDate": "2026-07-14" }
   ],

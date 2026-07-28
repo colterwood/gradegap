@@ -109,29 +109,55 @@ export function parseCards({ json }, player) {
 
 const GRADE_KEYS = ['grade', 'gradeNumber', 'grade_number', 'gradeLabel'];
 const COMPANY_KEYS = ['company', 'grader', 'gradingCompany', 'grading_company', 'service'];
+const CONDITION_KEYS = ['condition', 'conditionLabel', 'conditionName', 'gradeName', 'qualifier', 'label'];
 const VALUE_KEYS = ['value', 'clValue', 'indexValue', 'currentValue', 'estimatedValue', 'avg', 'average'];
 const SALE_PRICE_KEYS = ['lastSalePrice', 'lastSale', 'last_sale_price', 'price', 'salePrice', 'amount'];
 const SALE_DATE_KEYS = ['lastSaleDate', 'last_sale_date', 'date', 'saleDate', 'soldDate', 'timestamp'];
 
+// SGC's numeric 10 exists as both "10 Gem Mint" and the rarer, pricier
+// "10 Pristine". We canonicalize SGC Pristine to grade '10 PRI' so the
+// SGC-10-Gem-Mint vs PSA-10 comparison can never accidentally use a Pristine
+// value. Only SGC gets this treatment: for BGS "Pristine" IS the standard 10
+// label, and PSA 10 is always Gem Mint.
+const PRISTINE_RE = /\bpri(?:stine)?\b/i;
+
+function normalizeGrade(company, gradeRaw, contextText) {
+  let text = String(gradeRaw).trim();
+  const num = text.match(/[0-9]{1,2}(?:\.[05])?/);
+  if (!num) return null;
+  let grade = num[0];
+  if (company === 'SGC' && grade === '10' && (PRISTINE_RE.test(text) || PRISTINE_RE.test(contextText))) {
+    grade = '10 PRI';
+  }
+  return grade;
+}
+
 function extractCompanyGrade(record) {
   let company = firstKey(record, COMPANY_KEYS);
   let grade = firstKey(record, GRADE_KEYS);
-  // combined labels like "PSA 10" / "SGC10" in any string field
+  // condition/qualifier text that may carry "Gem Mint" / "Pristine"
+  let contextText = [grade, firstKey(record, CONDITION_KEYS)]
+    .filter((v) => typeof v === 'string')
+    .join(' ');
+  // combined labels like "PSA 10", "SGC 10 - Gem Mint", "SGC 10 Pristine"
   if (!company || grade === undefined) {
     for (const v of Object.values(record)) {
       if (typeof v !== 'string') continue;
-      const m = v.match(new RegExp(`^(${GRADERS.join('|')})\\s*([0-9.]+)$`, 'i'));
+      const m = v.match(new RegExp(`\\b(${GRADERS.join('|')})\\b[\\s-]*([0-9]{1,2}(?:\\.[05])?[a-zA-Z\\s-]*)`, 'i'));
       if (m) {
         company = company ?? m[1];
         grade = grade ?? m[2];
+        contextText += ' ' + v;
         break;
       }
     }
   }
-  if (!company || grade === undefined) return null;
+  if (!company || grade === undefined || grade === null) return null;
   company = String(company).toUpperCase().trim();
   if (!GRADERS.includes(company)) return null;
-  return { company, grade: String(grade).trim() };
+  const normalized = normalizeGrade(company, grade, contextText);
+  if (normalized === null) return null;
+  return { company, grade: normalized };
 }
 
 const toNumber = (v) => {

@@ -123,6 +123,47 @@ test('parsePrices: merges value and sale from separate records', () => {
   assert.equal(r.data[0].lastSaleDate, '2026-07-16');
 });
 
+test('parsePrices: SGC Gem Mint vs Pristine are distinct grades', () => {
+  const json = {
+    conditions: [
+      { label: 'SGC 10 - Gem Mint', value: 24500 },
+      { label: 'SGC 10 Pristine', value: 120000 },
+      { label: 'SGC 10 PRI', lastSale: 118000 },
+      { label: 'PSA 10 - Gem Mint', value: 175000 },
+    ],
+  };
+  const r = parsePrices({ json });
+  assert.equal(r.ok, true);
+  const gm = r.data.find((p) => p.company === 'SGC' && p.grade === '10');
+  const pri = r.data.find((p) => p.company === 'SGC' && p.grade === '10 PRI');
+  const psa = r.data.find((p) => p.company === 'PSA' && p.grade === '10');
+  assert.equal(gm.clValue, 24500);
+  assert.equal(pri.clValue, 120000);
+  assert.equal(pri.lastSalePrice, 118000);
+  assert.equal(psa.clValue, 175000);
+});
+
+test('parsePrices: pristine in a separate condition field', () => {
+  const json = {
+    rows: [
+      { company: 'SGC', grade: 10, condition: 'Pristine', value: 90000 },
+      { company: 'SGC', grade: 10, condition: 'Gem Mint', value: 20000 },
+    ],
+  };
+  const r = parsePrices({ json });
+  assert.equal(r.ok, true);
+  assert.equal(r.data.find((p) => p.grade === '10 PRI').clValue, 90000);
+  assert.equal(r.data.find((p) => p.grade === '10').clValue, 20000);
+});
+
+test('parsePrices: BGS Pristine stays grade 10 (Pristine IS the BGS 10 label)', () => {
+  const json = { rows: [{ label: 'BGS 10 Pristine', value: 5000 }] };
+  const r = parsePrices({ json });
+  assert.equal(r.ok, true);
+  assert.equal(r.data[0].company, 'BGS');
+  assert.equal(r.data[0].grade, '10');
+});
+
 test('decodeFirestoreFields handles nested maps and arrays', () => {
   const out = decodeFirestoreFields({
     tags: { arrayValue: { values: [{ stringValue: 'a' }, { stringValue: 'b' }] } },

@@ -1,5 +1,7 @@
 // All prepared statements live here. Parsers and routes never build SQL.
 
+import { TARGETS } from '../config.js';
+
 export function makeQueries(db) {
   const upsertCard = db.prepare(`
     INSERT INTO cards (player_id, cl_card_id, name, set_name, year, card_number, parallel, cl_url, raw_json)
@@ -61,8 +63,10 @@ export function makeQueries(db) {
           psa.cl_value AS psa_cl_value
         FROM cards c
         JOIN players p ON p.id = c.player_id
-        LEFT JOIN grade_prices sgc ON sgc.card_id = c.id AND sgc.grading_company = 'SGC' AND sgc.grade = '10'
-        LEFT JOIN grade_prices psa ON psa.card_id = c.id AND psa.grading_company = 'PSA' AND psa.grade = '10'
+        LEFT JOIN grade_prices sgc ON sgc.card_id = c.id
+          AND sgc.grading_company = '${TARGETS.sgc.company}' AND sgc.grade = '${TARGETS.sgc.grade}'
+        LEFT JOIN grade_prices psa ON psa.card_id = c.id
+          AND psa.grading_company = '${TARGETS.psa.company}' AND psa.grade = '${TARGETS.psa.grade}'
         WHERE 1=1 ${playerFilter}
       ),
       comparable AS (
