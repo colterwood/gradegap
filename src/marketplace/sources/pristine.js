@@ -1,14 +1,26 @@
 // Pristine Auction (pristineauction.com) — high-volume daily auctions.
 // No anonymous JSON API is known and the site sits behind Cloudflare bot
 // checks, so this adapter drives the shared visible browser (same persistent
-// profile as the Card Ladder sync — clearance cookies stick) and reads the
-// search results page: schema.org JSON-LD blocks first, DOM tiles as a
-// fallback. EXPERIMENTAL: selectors are best-effort until verified locally
-// with `npm run test-source pristine "jordan psa 10"`.
+// profile as the Card Ladder sync — clearance cookies stick). Live testing
+// 404'd the guessed /search path, so instead of guessing URLs it uses the
+// site's OWN search box on the homepage and parses whatever results page
+// the site navigates to: schema.org JSON-LD blocks first, DOM tiles as a
+// fallback. Verify locally with
+// `npm run test-source pristine "jordan psa 10" --debug`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
+import { saveDebug, debugLog } from './util.js';
 
 const SITE = 'https://www.pristineauction.com';
+
+const SEARCH_INPUTS = [
+  'input[type="search"]',
+  'input[name="q"]',
+  'input[name="search"]',
+  'input[name="query"]',
+  'input[name="keyword"]',
+  'input[placeholder*="earch"]',
+];
 
 // Pure, fixture-testable: JSON-LD objects → normalized raw listings.
 export function parsePristineJsonLd(blocks) {
@@ -56,11 +68,31 @@ export function createPristineSource() {
     },
 
     async search({ text }) {
-      await page.goto(`${SITE}/search?q=${encodeURIComponent(text)}`, {
-        waitUntil: 'domcontentloaded',
-        timeout: 45_000,
-      });
-      await page.waitForTimeout(2500); // let the results (and any CF check) settle
+      // Use the site's own search box — URL guessing 404'd in live testing.
+      await page.goto(`${SITE}/`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+      await page.waitForTimeout(2000); // homepage settle / CF check
+
+      let box = null;
+      for (const sel of SEARCH_INPUTS) {
+        const candidate = page.locator(sel).first();
+        if (await candidate.isVisible().catch(() => false)) {
+          box = candidate;
+          debugLog('pristine', `using search input: ${sel}`);
+          break;
+        }
+      }
+      if (!box) {
+        saveDebug('pristine', 'homepage', await page.content().catch(() => ''), 'html');
+        const shot = await page.screenshot().catch(() => null);
+        if (shot) saveDebug('pristine', 'screenshot', shot, 'png');
+        throw new Error(`Pristine: no search input found on homepage (title: ${await page.title().catch(() => '?')})`);
+      }
+      await box.fill(text);
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => null),
+        box.press('Enter'),
+      ]);
+      await page.waitForTimeout(2500); // results render
 
       const blocks = await page.$$eval('script[type="application/ld+json"]', (nodes) =>
         nodes.map((n) => {
@@ -68,7 +100,9 @@ export function createPristineSource() {
         }).filter(Boolean)
       ).catch(() => []);
       const fromLd = parsePristineJsonLd(blocks.flat());
+      debugLog('pristine', `landed on ${page.url()} — ${blocks.length} JSON-LD blocks, ${fromLd.length} products`);
       if (fromLd.length > 0) return fromLd;
+      saveDebug('pristine', 'results', await page.content().catch(() => ''), 'html');
 
       // Fallback: auction item tiles link to /auction/item/<id>-<slug>.
       return page.$$eval('a[href*="/auction/item/"]', (links) => {

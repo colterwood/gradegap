@@ -7,12 +7,12 @@
 // EXPERIMENTAL until verified locally with
 // `npm run test-source classic "jordan psa"`.
 
-import { fetchHtml, toNumber, absUrl } from './util.js';
+import { fetchHtml, toNumber, absUrl, decodeEntities, saveDebug, debugLog } from './util.js';
 
 const SITE = 'https://www.classicauctions.net';
 const MAX_PAGES = 12;
 
-const stripTags = (s) => String(s ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+const stripTags = (s) => decodeEntities(String(s ?? '').replace(/<[^>]+>/g, ' '));
 
 // Pure, fixture-testable: catalog HTML → lots (id, title, url, price, image).
 // Lot links look like /lot-173141.aspx or /some_slug-lot150174.aspx.
@@ -58,6 +58,7 @@ export function createClassicSource() {
       // match layer re-checks anyway) must appear in the lot title.
       const tokens = text.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
       const all = [];
+      let firstPageHtml = null;
       for (let page = 1; page <= MAX_PAGES; page++) {
         const url = page === 1
           ? `${SITE}/catalog.aspx?lotsperpage=100`
@@ -68,11 +69,17 @@ export function createClassicSource() {
         } catch {
           break; // paging past the end / transient failure — keep what we have
         }
+        if (page === 1) firstPageHtml = html;
         const lots = parseClassicCatalog(html);
+        debugLog('classic', `page ${page}: ${lots.length} lot anchors in ${html.length}b`);
         const fresh = lots.filter((l) => !all.some((a) => a.listingId === l.listingId));
         if (fresh.length === 0) break; // no new lots → past the last page
         all.push(...fresh);
         await new Promise((r) => setTimeout(r, 1500));
+      }
+      if (all.length === 0 && firstPageHtml != null) {
+        // No lot anchors at all: either between auctions or the markup moved.
+        saveDebug('classic', 'catalog', firstPageHtml, 'html');
       }
       return all.filter((l) => {
         const t = l.title.toLowerCase();

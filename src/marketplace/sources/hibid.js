@@ -40,12 +40,15 @@ export function parseHibidResults(results) {
   for (const lot of results ?? []) {
     if (lot?.itemId == null || !lot.lead) continue;
     if (lot.lotState?.isClosed) continue;
+    // A lot with no bids reports highBid 0 — that's "no price yet", not $0.
+    const highBid = lot.lotState?.highBid;
+    const minBid = lot.lotState?.minBid;
     out.push({
       listingId: String(lot.itemId),
       canonicalKey: `hibid:${lot.itemId}`,
       title: lot.lead,
       url: `${SITE}/lot/${lot.itemId}`,
-      price: lot.lotState?.highBid ?? lot.lotState?.minBid ?? null,
+      price: highBid > 0 ? highBid : minBid > 0 ? minBid : null,
       currency: lot.auction?.currencyAbbreviation ?? 'CAD',
       listingType: 'auction',
       endsAt: lot.auction?.bidCloseDateTime ?? null,

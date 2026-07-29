@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseComcFeed } from '../src/marketplace/sources/comc.js';
-import { parseFanaticsListing } from '../src/marketplace/sources/fanatics.js';
+import { parseFanaticsListing, parseFanaticsAlgoliaHit } from '../src/marketplace/sources/fanatics.js';
 import { parseHibidResults } from '../src/marketplace/sources/hibid.js';
 import { parseAuctionWorxBrowse } from '../src/marketplace/sources/cia.js';
 import { parseClassicCatalog } from '../src/marketplace/sources/classic.js';
@@ -18,7 +18,7 @@ import { extractViewVars, parseMillerLots } from '../src/marketplace/sources/mil
 import { extractGoldinConfig, parseGoldinLots } from '../src/marketplace/sources/goldin.js';
 import { parseCatawikiLots } from '../src/marketplace/sources/catawiki.js';
 import { parsePristineJsonLd } from '../src/marketplace/sources/pristine.js';
-import { extractJsonLd } from '../src/marketplace/sources/util.js';
+import { extractJsonLd, decodeEntities, withTimeout } from '../src/marketplace/sources/util.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -165,6 +165,79 @@ test('catawiki: joins search lots with bidding state, prefers USD quote, drops c
   assert.equal(out[0].price, 11624);
   assert.equal(out[0].currency, 'USD');
   assert.equal(out[0].endsAt, '2026-08-01T20:04:00Z');
+});
+
+test('util: decodeEntities handles named + numeric refs', () => {
+  assert.equal(decodeEntities('PSA&nbsp;10&nbsp;GEM&#8209;MT &amp; more'), 'PSA 10 GEM‑MT & more');
+});
+
+test('util: withTimeout rejects a stuck promise', async () => {
+  await assert.rejects(
+    () => withTimeout(new Promise(() => {}), 50, 'stuck thing'),
+    /stuck thing timed out/
+  );
+  assert.equal(await withTimeout(Promise.resolve(7), 1000), 7);
+});
+
+test('comc: titles with embedded HTML entities are decoded', () => {
+  // Real live-feed URL shape: card number (short) + item id (long) + graded
+  // suffix — the id must be the long segment, never the trailing grade.
+  const xml = `<rss><channel><item>
+    <guid>https://www.comc.com/Cards/Basketball/1996/Fleer/47/Michael_Jordan/24815903/Graded/PSA/10</guid>
+    <title>1996 Fleer Michael Jordan [PSA&nbsp;10&nbsp;GEM&nbsp;MT]</title>
+    <link>https://www.comc.com/Cards/Basketball/1996/Fleer/47/Michael_Jordan/24815903/Graded/PSA/10</link>
+    <description>Sale Price: $99.00</description>
+  </item></channel></rss>`;
+  const out = parseComcFeed(xml);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].listingId, '24815903');
+  assert.equal(out[0].title, '1996 Fleer Michael Jordan [PSA 10 GEM MT]');
+});
+
+test('fanatics: Algolia hits map tolerantly (cents, dollars, epoch ends)', () => {
+  const auction = parseFanaticsAlgoliaHit({
+    listingUuid: 'u-1',
+    title: '1986 Fleer Michael Jordan #57 PSA 10',
+    marketplace: 'WEEKLY',
+    currentBidAmountInCents: 4500000,
+    auctionEndsAt: 1785540000, // seconds epoch
+    images: { primary: { small: 'https://img/s.jpg' } },
+  });
+  assert.equal(auction.listingType, 'auction');
+  assert.equal(auction.price, 45000);
+  assert.match(auction.endsAt, /^20\d\d-.*Z$/);
+
+  const fixed = parseFanaticsAlgoliaHit({
+    objectID: 'o-2',
+    name: 'Card',
+    marketplace: 'FIXED',
+    buyNowPrice: 125.5,
+  });
+  assert.equal(fixed.listingType, 'fixed');
+  assert.equal(fixed.price, 125.5);
+  assert.equal(fixed.endsAt, null);
+
+  assert.equal(parseFanaticsAlgoliaHit({ objectID: 'no-title' }), null);
+});
+
+test('hibid: zero-bid lots report null price, not $0', () => {
+  const out = parseHibidResults([
+    { itemId: 5, lead: 'No bids yet PSA 10', lotState: { highBid: 0, minBid: 0, isClosed: false }, auction: {} },
+    { itemId: 6, lead: 'Min bid only PSA 10', lotState: { highBid: 0, minBid: 25, isClosed: false }, auction: {} },
+  ]);
+  assert.equal(out[0].price, null);
+  assert.equal(out[1].price, 25);
+});
+
+test('cia: data-listingid on non-section elements still parses', () => {
+  const html = `<div data-listingid="777" class="row">
+    <h1 class="title"><a href="/Event/LotDetails/777/slug">Lot 7 - 1979 OPC Gretzky PSA 5</a></h1>
+    <span class="awe-rt-CurrentPrice price">$900.00</span>
+  </div>`;
+  const out = parseAuctionWorxBrowse(html);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].listingId, '777');
+  assert.equal(out[0].price, 900);
 });
 
 test('pristine: parses Product JSON-LD, including ItemList wrappers', () => {

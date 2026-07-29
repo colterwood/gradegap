@@ -4,7 +4,7 @@
 // auctions, so everything is fixed-price and there's nothing to end-filter.
 // Verify locally with `npm run test-source comc "jordan psa 10"`.
 
-import { fetchHtml, toNumber } from './util.js';
+import { fetchHtml, toNumber, decodeEntities } from './util.js';
 
 const SITE = 'https://www.comc.com';
 
@@ -25,10 +25,14 @@ export function parseComcFeed(xml) {
   for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
     const item = m[1];
     const link = unescapeXml(tag(item, 'link') ?? tag(item, 'guid') ?? '').trim();
-    const title = unescapeXml(tag(item, 'title') ?? '').trim();
-    // The card id is the last all-numeric path segment — trailing segments
-    // like /Ungraded/COMC/EX-NM may follow it.
-    const id = [...link.matchAll(/\/(\d+)(?=\/|$)/g)].pop()?.[1];
+    // Titles carry embedded HTML entities (&nbsp;, &#8209;) — decode twice:
+    // once for the XML layer, once for the HTML inside it.
+    const title = decodeEntities(unescapeXml(tag(item, 'title') ?? ''));
+    // The card id is the last LONG numeric path segment. Trailing segments
+    // may follow it (/Ungraded/COMC/EX-NM, /Graded/PSA/10) and short numeric
+    // segments appear as card numbers (/47/) and grades (/10) — requiring 4+
+    // digits keeps only the item id.
+    const id = [...link.matchAll(/\/(\d{4,})(?=\/|$)/g)].pop()?.[1];
     if (!id || !title) continue;
     const desc = unescapeXml(tag(item, 'description') ?? '');
     const price = toNumber(desc.match(/Sale Price:\s*\$?([\d,]+(?:\.\d{2})?)/i)?.[1]);

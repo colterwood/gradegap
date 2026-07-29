@@ -1,17 +1,18 @@
-// Goldin (goldin.co) — weekly + premier auctions. Goldin fronts its Algolia
-// search with its own backend API whose hostnames rotate with each frontend
-// deploy, so the adapter discovers them at runtime from the site's JS bundle
-// (the same way the public clients do) and caches them in source_state for a
-// day. EXPERIMENTAL: shapes come from public client code, not a live capture
-// — verify locally with `npm run test-source goldin "jordan psa 10"`.
+// Goldin (goldin.co) — weekly + premier auctions. Their backend API hosts
+// rotate per frontend deploy and Cloudflare dislikes plain clients (live
+// testing hung), so this adapter drives the shared visible browser to the
+// site's own search results and SNIFFS the lots API response off the wire —
+// the same watchAuth pattern the Card Ladder scraper uses. No endpoint
+// hardcoding, no bundle parsing at runtime.
+// Verify locally with `npm run test-source goldin "jordan psa 10"`.
 
-import { fetchWithTimeout, fetchHtml, toNumber } from './util.js';
+import { acquireBrowser } from '../../scraper/browserLease.js';
+import { toNumber, saveDebug, debugLog } from './util.js';
 
 const SITE = 'https://goldin.co';
 
-// Endpoint discovery: the buy page links a hashed client bundle whose source
-// embeds an API url map ({... auctions: "https://...", lots_v2: "https://..."})
-// and the image CDN base.
+// Kept exported for tests/reference: pulls the API map + image CDN base out
+// of Goldin's client JS bundle (the discovery approach public clients use).
 export function extractGoldinConfig(bundleJs) {
   const grab = (re) => bundleJs.match(re)?.[1] ?? null;
   return {
@@ -21,7 +22,7 @@ export function extractGoldinConfig(bundleJs) {
   };
 }
 
-// Pure, fixture-testable: the lots response → normalized raw listings.
+// Pure, fixture-testable: a lots response body → normalized raw listings.
 export function parseGoldinLots(body, cloudFront) {
   const lots = body?.searchalgolia?.lots ?? body?.lots ?? [];
   const out = [];
@@ -49,78 +50,73 @@ export function parseGoldinLots(body, cloudFront) {
   return out;
 }
 
+// Does a response body look like a Goldin lots payload?
+const looksLikeLots = (json) =>
+  Array.isArray(json?.searchalgolia?.lots) || (Array.isArray(json?.lots) && json.lots.length >= 0 && json.lots[0]?.title !== undefined);
+
 export function createGoldinSource() {
-  let q = null;
-  let cfg = null;
-  let auctionIds = null;
-
-  async function discover(force = false) {
-    if (!force) {
-      const cached = q?.getSourceState.get('goldin')?.auth_json;
-      if (cached) {
-        try {
-          const saved = JSON.parse(cached);
-          if (saved.cfg?.lotsUrl && Date.now() - saved.at < 24 * 60 * 60 * 1000) {
-            cfg = saved.cfg;
-            return;
-          }
-        } catch { /* re-discover */ }
-      }
-    }
-    const html = await fetchHtml(`${SITE}/buy/`);
-    const bundlePath = html.match(/<script[^>]+src=["']([^"']*client\.[a-z0-9]+\.js)["']/i)?.[1];
-    if (!bundlePath) throw new Error('Goldin: could not find client bundle in /buy/ — site layout changed');
-    const bundleJs = await fetchHtml(new URL(bundlePath, SITE).href);
-    cfg = extractGoldinConfig(bundleJs);
-    if (!cfg.lotsUrl) throw new Error('Goldin: could not extract lots API url from bundle — adapter needs updating');
-    q?.ensureSourceState.run('goldin');
-    q?.setSourceAuth.run(JSON.stringify({ cfg, at: Date.now() }), 'goldin');
-  }
-
-  async function post(url, body) {
-    const res = await fetchWithTimeout(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', origin: SITE, referer: `${SITE}/` },
-      body: JSON.stringify(body),
-    });
-    if (res.status === 429) throw Object.assign(new Error('Goldin rate limited (429)'), { rateLimited: true });
-    if (!res.ok) throw new Error(`Goldin HTTP ${res.status}: ${url}`);
-    return res.json();
-  }
+  let lease = null;
+  let page = null;
+  let sniffed = [];
 
   return {
     name: 'goldin',
-    needsBrowser: false,
-    minIntervalMs: 4000,
+    needsBrowser: true,
+    minIntervalMs: 6000,
 
-    async start(ctx = {}) {
-      q = ctx.q ?? null;
-      await discover();
-      const auctions = await post(cfg.auctionsUrl ?? cfg.lotsUrl, { status: 'Active', order: 'asc' }).catch(() => null);
-      auctionIds = (auctions?.auctions ?? []).map((a) => a.auction_id).filter((x) => x != null);
+    async start() {
+      lease = await acquireBrowser();
+      page = await lease.context.newPage();
+      // Sniff every JSON response; keep any that look like lots payloads.
+      page.on('response', async (res) => {
+        try {
+          const ct = res.headers()['content-type'] ?? '';
+          if (!ct.includes('json')) return;
+          const json = await res.json().catch(() => null);
+          if (json && looksLikeLots(json)) sniffed.push({ url: res.url(), json });
+        } catch {
+          // detached/aborted responses — ignore
+        }
+      });
     },
 
     async search({ text }) {
-      const body = {
-        search: {
-          queryType: 'Featured',
-          query: text,
-          size: 48,
-          from: 0,
-          ...(auctionIds?.length ? { auction_id: auctionIds } : {}),
-        },
-      };
-      try {
-        return parseGoldinLots(await post(cfg.lotsUrl, body), cfg.cloudFront);
-      } catch (err) {
-        if (err.rateLimited) throw err;
-        // A stale cached endpoint (frontend redeployed) is the common failure:
-        // re-discover once and retry.
-        await discover(true);
-        return parseGoldinLots(await post(cfg.lotsUrl, body), cfg.cloudFront);
+      sniffed = [];
+      await page.goto(`${SITE}/buy?search=${encodeURIComponent(text)}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 45_000,
+      });
+      // Give the SPA time to fire its search request(s).
+      for (let i = 0; i < 10 && sniffed.length === 0; i++) await page.waitForTimeout(1000);
+      await page.waitForTimeout(1500); // let a late richer response land too
+
+      debugLog('goldin', `sniffed ${sniffed.length} lots-shaped responses`);
+      if (sniffed.length === 0) {
+        saveDebug('goldin', 'page', await page.content().catch(() => ''), 'html');
+        const shot = await page.screenshot({ fullPage: false }).catch(() => null);
+        if (shot) saveDebug('goldin', 'screenshot', shot, 'png');
+        debugLog('goldin', `page title: ${await page.title().catch(() => '?')}`);
+        return [];
       }
+      saveDebug('goldin', 'lots-response', JSON.stringify(sniffed[0].json).slice(0, 20000), 'json');
+
+      // Merge every sniffed payload (the SPA may page or refine).
+      const seen = new Set();
+      const out = [];
+      for (const { json } of sniffed) {
+        for (const l of parseGoldinLots(json, null)) {
+          if (!seen.has(l.listingId) && seen.add(l.listingId)) out.push(l);
+        }
+      }
+      return out;
     },
 
-    async close() {},
+    async close() {
+      await page?.close().catch(() => {});
+      await lease?.release().catch(() => {});
+      page = null;
+      lease = null;
+      sniffed = [];
+    },
   };
 }

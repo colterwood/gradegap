@@ -11,12 +11,19 @@
 import { openDb } from '../src/db/db.js';
 import { makeQueries } from '../src/db/queries.js';
 import { REGISTRY } from '../src/marketplace/sources/index.js';
+import { withTimeout } from '../src/marketplace/sources/util.js';
 
-const [name, ...rest] = process.argv.slice(2);
+const args = process.argv.slice(2);
+// --debug saves the raw payloads each adapter parsed (plus screenshots for
+// browser sources) to captures/source-debug/ — attach those when reporting
+// a source that returns nothing or garbage.
+const debug = args.includes('--debug');
+if (debug) process.env.WATCH_DEBUG = '1';
+const [name, ...rest] = args.filter((a) => a !== '--debug');
 const query = rest.join(' ').trim() || 'michael jordan psa 10';
 
 if (!name || !REGISTRY[name]) {
-  console.error(`usage: npm run test-source -- <source> "<query>"`);
+  console.error(`usage: npm run test-source -- <source> "<query>" [--debug]`);
   console.error(`sources: ${Object.keys(REGISTRY).join(', ')}`);
   process.exit(1);
 }
@@ -26,9 +33,9 @@ const q = makeQueries(db);
 const source = await REGISTRY[name]();
 
 try {
-  await source.start({ q, db });
+  await withTimeout(source.start({ q, db }), 60_000, `${name} start`);
   const t0 = Date.now();
-  const results = await source.search({ text: query });
+  const results = await withTimeout(source.search({ text: query }), 90_000, `${name} search`);
   console.log(`\n${source.name}: ${results.length} raw listings for "${query}" in ${Date.now() - t0}ms\n`);
   for (const r of results.slice(0, 20)) {
     const price = r.price != null ? `${r.price.toLocaleString('en-US')} ${r.currency ?? ''}`.trim() : '—';

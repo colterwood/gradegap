@@ -7,6 +7,7 @@
 // `npm run test-source heritage "jordan psa 10"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
+import { saveDebug, debugLog } from './util.js';
 
 const SITE = 'https://sports.ha.com';
 
@@ -32,8 +33,8 @@ export function createHeritageSource() {
       });
       await page.waitForTimeout(2000);
 
-      // One li.item-block per lot; id = "{saleNo}-{itemId}".
-      return page.$$eval('li.item-block', (blocks) =>
+      // One .item-block per lot (usually an <li>); id = "{saleNo}-{itemId}".
+      const results = await page.$$eval('.item-block', (blocks) =>
         blocks.map((li) => {
           const titleA = li.querySelector('a.item-title');
           const title = (titleA?.textContent ?? '').trim().replace(/\s+/g, ' ');
@@ -57,6 +58,16 @@ export function createHeritageSource() {
           };
         }).filter(Boolean)
       ).catch(() => []);
+
+      if (results.length === 0) {
+        // 0 can be legit (no live lots match) or a bot-block/redirect — the
+        // page title and capture tell them apart.
+        debugLog('heritage', `0 item-blocks — landed on "${await page.title().catch(() => '?')}" at ${page.url()}`);
+        saveDebug('heritage', 'results', await page.content().catch(() => ''), 'html');
+        const shot = await page.screenshot().catch(() => null);
+        if (shot) saveDebug('heritage', 'screenshot', shot, 'png');
+      }
+      return results;
     },
 
     async close() {

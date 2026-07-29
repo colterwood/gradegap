@@ -9,6 +9,7 @@
 import { config } from '../config.js';
 import { buildQueries, scoreListing } from './match.js';
 import { createMarketplaceSources } from './sources/index.js';
+import { withTimeout } from './sources/util.js';
 import { createFx } from './fx.js';
 import { sendNtfy } from './notify.js';
 
@@ -103,9 +104,10 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
     const queries = buildQueries(target);
     currentLabel = `${source.name} — ${target.year ?? ''} ${target.playerName} ${target.company} ${target.grade}`.trim();
 
-    let raw = await source.search({ text: queries.tight });
+    // Hard-capped: a wedged site fails this item, never the whole run.
+    let raw = await withTimeout(source.search({ text: queries.tight }), 90_000, `${source.name} search`);
     if ((!raw || raw.length === 0) && queries.loose) {
-      raw = await source.search({ text: queries.loose });
+      raw = await withTimeout(source.search({ text: queries.loose }), 90_000, `${source.name} search`);
     }
 
     const scored = [];
@@ -143,7 +145,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
     }
 
     try {
-      await source.start({ q, db });
+      await withTimeout(source.start({ q, db }), 60_000, `${source.name} start`);
     } catch (err) {
       lastError = String(err?.message ?? err);
       return failAll(lastError);

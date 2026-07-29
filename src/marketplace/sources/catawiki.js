@@ -7,6 +7,7 @@
 // Verify locally with `npm run test-source catawiki "jordan psa 10"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
+import { saveDebug, debugLog } from './util.js';
 
 const SITE = 'https://www.catawiki.com';
 
@@ -56,11 +57,19 @@ export function createCatawikiSource() {
 
     async search({ text }) {
       const res = await page.evaluate(async (q) => {
+        // Every in-page fetch gets a hard 10s abort — a stalled PerimeterX
+        // check must fail the call, not hang the whole run.
         const getJson = async (url) => {
-          const r = await fetch(url, { headers: { accept: 'application/json' } });
-          const body = await r.text();
-          if (!body.trimStart().startsWith('{')) return { status: r.status, json: null };
-          return { status: r.status, json: JSON.parse(body) };
+          const ctl = new AbortController();
+          const t = setTimeout(() => ctl.abort(), 10_000);
+          try {
+            const r = await fetch(url, { headers: { accept: 'application/json' }, signal: ctl.signal });
+            const body = await r.text();
+            if (!body.trimStart().startsWith('{')) return { status: r.status, json: null };
+            return { status: r.status, json: JSON.parse(body) };
+          } finally {
+            clearTimeout(t);
+          }
         };
         try {
           const search = await getJson(`/buyer/api/v1/search?q=${encodeURIComponent(q)}&page=1`);
@@ -78,7 +87,13 @@ export function createCatawikiSource() {
         }
       }, text);
       if (res.status === 429) throw Object.assign(new Error('Catawiki rate limited (429)'), { rateLimited: true });
-      if (res.status !== 200 || !res.lots) throw new Error(`Catawiki search failed (HTTP ${res.status || 'none'})`);
+      if (res.status !== 200 || !res.lots) {
+        saveDebug('catawiki', 'page', await page.content().catch(() => ''), 'html');
+        const shot = await page.screenshot().catch(() => null);
+        if (shot) saveDebug('catawiki', 'screenshot', shot, 'png');
+        throw new Error(`Catawiki search failed (HTTP ${res.status || 'none'}${res.error ? ` — ${res.error}` : ''})`);
+      }
+      debugLog('catawiki', `search returned ${res.lots.length} lots`);
       return parseCatawikiLots(res.lots, res.bidding);
     },
 

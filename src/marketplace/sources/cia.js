@@ -5,18 +5,18 @@
 // tokens. Between auctions the search simply returns nothing.
 // Verify locally with `npm run test-source cia "jordan psa"`.
 
-import { fetchHtml, toNumber, absUrl } from './util.js';
+import { fetchHtml, toNumber, absUrl, decodeEntities, saveDebug, debugLog } from './util.js';
 
 const SITE = 'https://bid.collectorinvestorauctions.com';
 
-const stripTags = (s) => String(s ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+const stripTags = (s) => decodeEntities(String(s ?? '').replace(/<[^>]+>/g, ' '));
 
 // Pure, fixture-testable: AuctionWorx /Browse HTML → normalized raw listings.
 export function parseAuctionWorxBrowse(html, site = SITE) {
   const out = [];
-  // Each result is a section carrying data-listingid; capture through to the
-  // next section (or end).
-  const re = /<section[^>]*data-listingid=["'](\d+)["'][^>]*>([\s\S]*?)(?=<section[^>]*data-listingid=|$)/gi;
+  // Each result is an element carrying data-listingid (a <section> in stock
+  // AuctionWorx, but skins vary); capture through to the next one (or end).
+  const re = /<\w+[^>]*data-listingid=["'](\d+)["'][^>]*>([\s\S]*?)(?=<\w+[^>]*data-listingid=|$)/gi;
   for (const m of html.matchAll(re)) {
     const [, id, block] = m;
     // Title anchor lives in h1.title (AuctionWorx renders "Lot N - Title").
@@ -64,7 +64,14 @@ export function createCiaSource() {
         page: '0',
       });
       const html = await fetchHtml(`${SITE}/Browse?${params}`);
-      return parseAuctionWorxBrowse(html);
+      const out = parseAuctionWorxBrowse(html);
+      if (out.length === 0) {
+        // Legit between monthly auctions, or a markup change — capture tells.
+        const markers = (html.match(/data-listingid/g) ?? []).length;
+        debugLog('cia', `0 parsed — ${markers} data-listingid markers in ${html.length}b of HTML`);
+        saveDebug('cia', 'browse', html, 'html');
+      }
+      return out;
     },
 
     async close() {},

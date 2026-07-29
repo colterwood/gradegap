@@ -25,14 +25,18 @@ export function createMySlabsSource() {
         const id = url?.match(/\/(\d+)(?:[/?#]|$)/)?.[1] ?? url;
         const title = (tile.querySelector('.slab-title')?.textContent ?? '').trim().replace(/\s+/g, ' ');
         if (!id || !title) return null;
-        const priceText = tile.querySelector('.slab-price')?.textContent?.match(/\$[\d,]+(?:\.\d{2})?/)?.[0];
+        // .slab-price when present; otherwise the first $ amount anywhere in
+        // the tile (live testing showed the dedicated class missing).
+        const priceText =
+          tile.querySelector('.slab-price')?.textContent?.match(/\$[\d,]+(?:\.\d{2})?/)?.[0] ??
+          tile.textContent?.match(/\$\s*[\d,]+(?:\.\d{2})?/)?.[0];
         const img = tile.querySelector('.slab_item_img_inside img') ?? tile.querySelector('img');
         return {
           listingId: String(id),
           canonicalKey: `myslabs:${id}`,
           title,
           url,
-          price: priceText ? parseFloat(priceText.replace(/[$,]/g, '')) : null,
+          price: priceText ? parseFloat(priceText.replace(/[$,\s]/g, '')) : null,
           currency: 'USD',
           listingType: meta.listingType,
           endsAt: null, // end time isn't on the tile; the detail page has it

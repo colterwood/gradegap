@@ -3,6 +3,10 @@
 // parse functions pure (and exported) so they're unit-testable against
 // fixture payloads without any network.
 
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { config } from '../../config.js';
+
 export const BROWSER_HEADERS = {
   'user-agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
@@ -53,6 +57,57 @@ export const absUrl = (href, base) => {
     return null;
   }
 };
+
+// Hard cap any promise — a stuck source must fail its item, never freeze a
+// whole check run (learned the hard way from an unbounded FX fetch).
+export function withTimeout(promise, ms, label = 'operation') {
+  let timer;
+  const bomb = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([promise, bomb]).finally(() => clearTimeout(timer));
+}
+
+// Minimal HTML entity decoding for scraped titles (&nbsp;, &#8209;, &amp;…).
+export function decodeEntities(s) {
+  return String(s ?? '')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// --- debug capture (npm run test-source -- <source> "<q>" --debug) ---------
+// When WATCH_DEBUG=1, adapters save the raw payloads they parsed (HTML/JSON/
+// screenshots) to captures/source-debug/ so a failing source becomes a
+// paste-the-file bug report instead of a guessing game.
+
+export const debugEnabled = () => process.env.WATCH_DEBUG === '1';
+
+export function saveDebug(source, kind, content, ext = 'txt') {
+  if (!debugEnabled()) return null;
+  try {
+    const dir = path.join(config.capturesDir, 'source-debug');
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const file = path.join(dir, `${source}-${kind}-${stamp}.${ext}`);
+    writeFileSync(file, content);
+    console.log(`  [debug] saved ${file}`);
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+export function debugLog(source, message) {
+  if (debugEnabled()) console.log(`  [debug] ${source}: ${message}`);
+}
 
 // Pull every <script type="application/ld+json"> object out of an HTML page —
 // many auction sites embed lot data as schema.org Product/Offer entries.

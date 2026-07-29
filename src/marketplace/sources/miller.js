@@ -7,7 +7,7 @@
 // locally. EXPERIMENTAL until verified with
 // `npm run test-source miller "jordan psa"`.
 
-import { fetchHtml, absUrl } from './util.js';
+import { fetchHtml, absUrl, saveDebug, debugLog } from './util.js';
 
 const SITE = 'https://live.millerandmillerauctions.com';
 
@@ -71,7 +71,10 @@ export function createMillerSource() {
       // Send both common Auction Mobility keyword params; harmless if ignored.
       const params = new URLSearchParams({ keyword: text, terms: text, sort: 'lot_number', page: '1' });
       const html = await fetchHtml(`${SITE}/lots?${params}`);
-      const lots = parseMillerLots(extractViewVars(html));
+      const vv = extractViewVars(html);
+      const lots = parseMillerLots(vv);
+      debugLog('miller', `viewVars found: ${vv ? 'yes' : 'NO'}; lots in page: ${lots.length}`);
+      if (lots.length === 0) saveDebug('miller', 'lots-page', html, 'html');
       // If the server ignored the keyword params we get the whole catalog —
       // filter locally so the match layer isn't flooded.
       const tokens = text.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
