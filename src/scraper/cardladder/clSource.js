@@ -10,11 +10,13 @@
 //   refreshAuth()                        -> reload to mint a fresh token
 //   close()
 
-import { launchBrowser, looksLoggedOut } from '../browser.js';
+import { looksLoggedOut } from '../browser.js';
+import { acquireBrowser } from '../browserLease.js';
 import { buildLadderUrl } from './endpoints.js';
 import * as nav from './navigate.js';
 
 export function createCardLadderSource() {
+  let lease = null;
   let context = null;
   let page = null;
   let lastAuth = null;
@@ -32,9 +34,15 @@ export function createCardLadderSource() {
     name: 'cardladder',
 
     async start() {
-      context = await launchBrowser();
+      // The persistent profile is shared (leased) with marketplace sources —
+      // see browserLease.js. This source opens its own page in it.
+      lease = await acquireBrowser();
+      context = lease.context;
       watchAuth(context);
-      page = context.pages()[0] ?? (await context.newPage());
+      // Reuse only the context's initial blank tab — any other page belongs
+      // to another lease holder (a marketplace source).
+      const blank = context.pages().find((p) => p.url() === 'about:blank');
+      page = blank ?? (await context.newPage());
       await nav.goToLadder(page);
       if (await looksLoggedOut(page)) {
         throw new Error('Not logged in to Card Ladder — run `npm run login` first.');
@@ -94,7 +102,9 @@ export function createCardLadderSource() {
     },
 
     async close() {
-      await context?.close().catch(() => {});
+      await page?.close().catch(() => {});
+      await lease?.release().catch(() => {});
+      lease = null;
       context = null;
       page = null;
     },
