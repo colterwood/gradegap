@@ -23,7 +23,7 @@ async function waitUntilDone(mgr, timeoutMs = 20000) {
   }
 }
 
-const base = { basis: 'cl_value', sort: 'pct', direction: 'all', minPrice: 0, playerId: null, limit: 100, offset: 0 };
+const base = { basis: 'cl_value', sort: 'pct', direction: 'all', maxPrice: 0, playerId: null, limit: 100, offset: 0 };
 
 test('ladder crawl populates both grades and joins them', async () => {
   const { q, mgr } = freshManager();

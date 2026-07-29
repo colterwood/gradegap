@@ -41,7 +41,7 @@ export function makeApiRouter(db, q, syncManager) {
     const direction = ['grader_cheaper', 'psa_cheaper'].includes(req.query.direction)
       ? req.query.direction
       : 'all';
-    const minPrice = Math.max(0, parseFloat(req.query.minPrice) || 0);
+    const maxPrice = Math.max(0, parseFloat(req.query.maxPrice) || 0);
     const minDiff = Math.max(0, parseFloat(req.query.minDiff) || 0);
     const minPctDiff = Math.max(0, parseFloat(req.query.minPctDiff) || 0);
     // grades / graders: comma-separated subsets of COMPARE_GRADES /
@@ -57,7 +57,7 @@ export function makeApiRouter(db, q, syncManager) {
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 5000);
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
 
-    res.json(q.resultsQuery({ basis, sort, direction, minPrice, minDiff, minPctDiff, grades, graders, playerId, limit, offset }));
+    res.json(q.resultsQuery({ basis, sort, direction, maxPrice, minDiff, minPctDiff, grades, graders, playerId, limit, offset }));
   });
 
   return router;

@@ -1,7 +1,7 @@
 const state = {
   basis: 'cl_value',
   direction: 'all',
-  minPrice: 0,
+  maxPrice: 0, // 0 = no cap
   minDiff: 0,
   minPctDiff: 15, // matches the input's default value in index.html
   playerId: '',
@@ -104,7 +104,7 @@ async function loadResults() {
   const params = new URLSearchParams({
     basis: state.basis,
     direction: state.direction,
-    minPrice: state.minPrice,
+    maxPrice: state.maxPrice,
     minDiff: state.minDiff,
     minPctDiff: state.minPctDiff,
     grades: grades.join(','),
@@ -387,11 +387,11 @@ $('grader-filter').addEventListener('change', (e) => {
   loadResults().catch((err) => setError(err.message));
 });
 
-let minPriceDebounce = null;
-$('min-price').addEventListener('input', (e) => {
-  clearTimeout(minPriceDebounce);
-  minPriceDebounce = setTimeout(() => {
-    state.minPrice = parseFloat(e.target.value) || 0;
+let maxPriceDebounce = null;
+$('max-price').addEventListener('input', (e) => {
+  clearTimeout(maxPriceDebounce);
+  maxPriceDebounce = setTimeout(() => {
+    state.maxPrice = parseFloat(e.target.value) || 0;
     loadResults().catch((err) => setError(err.message));
   }, 300);
 });

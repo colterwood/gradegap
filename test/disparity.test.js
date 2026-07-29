@@ -33,7 +33,7 @@ function seedDb() {
   return { db, q };
 }
 
-const base = { basis: 'cl_value', sort: 'pct', direction: 'all', minPrice: 0, playerId: null, limit: 100, offset: 0 };
+const base = { basis: 'cl_value', sort: 'pct', direction: 'all', maxPrice: 0, playerId: null, limit: 100, offset: 0 };
 
 test('cl_value basis, pct sort, both directions', () => {
   const { q } = seedDb();
@@ -79,15 +79,18 @@ test('direction filters work', () => {
   assert.deepEqual(psaCheaper.rows.map((x) => x.name), ['1989 Hoops #200']);
 });
 
-test('min price filter uses the grader price, not the higher of the two', () => {
+test('max price filter caps on the grader price; 0 means no cap', () => {
   const { q } = seedDb();
-  // c2 is SGC 400 / PSA 500. At minPrice 450 an SGC-based filter drops it,
-  // whereas a max-of-both filter would keep it (PSA 500). Only c1 (SGC 1000)
-  // clears the bar.
-  const r = q.resultsQuery({ ...base, minPrice: 450 });
-  assert.deepEqual(r.rows.map((x) => x.name), ['1986 Fleer #57']);
-  assert.equal(r.total, 1);
+  // c1 is SGC 1000 / PSA 5000. At maxPrice 450 an SGC-based cap drops it,
+  // whereas a min-of-both cap would keep it. c2 (400), c3 (300), c4 (50) stay.
+  const r = q.resultsQuery({ ...base, maxPrice: 450 });
+  assert.deepEqual(r.rows.map((x) => x.name).sort(), [
+    '1987 Fleer #59', '1989 Hoops #200', '1990 Skybox #41',
+  ]);
+  assert.equal(r.total, 3);
   assert.equal(r.excludedMissingGrade, 1); // c5 still missing a grade
+  // 0 (the default) applies no cap at all.
+  assert.equal(q.resultsQuery({ ...base, maxPrice: 0 }).total, 4);
 });
 
 test('SGC 10 Pristine rows never enter the Gem Mint comparison', () => {

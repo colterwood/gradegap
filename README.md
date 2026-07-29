@@ -31,8 +31,8 @@ in via `.env`) and never leaves your computer.
 - The table ranks cards by disparity — toggleable between **% difference**
   and **$ difference**, between **CL Value** and **Last Sale** price basis,
   and filterable by grader (SGC / BGS), grade (7–10), liquidity (last-sale
-  recency; defaults to green — both sides sold in the last 3 months), minimum
-  grader-side price, minimum dollar gap (**Min $ Diff**), minimum percentage
+  recency; defaults to green — both sides sold in the last 3 months), maximum
+  grader-side price (0 = no cap), minimum dollar gap (**Min $ Diff**), minimum percentage
   gap (**Min % Diff**, default 15%), and player. **Grade** and **Grader**
   columns show which comparison a row came from, and the Sales No columns show
   each side's Number of Sales. The default sort is biggest $ Diff first. Every

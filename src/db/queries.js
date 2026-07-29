@@ -51,7 +51,7 @@ export function makeQueries(db) {
   // grades: which numeric grades to compare like-for-like (<grader> g vs PSA g).
   //   Omitted -> ['10'] (the original behavior). A 9 is never compared to a 10:
   //   each (card, grade, grader) with both sides is its own row.
-  function resultsQuery({ basis, sort, direction, minPrice, minDiff, minPctDiff, grades, graders, playerId, limit, offset }) {
+  function resultsQuery({ basis, sort, direction, maxPrice, minDiff, minPctDiff, grades, graders, playerId, limit, offset }) {
     const basisCol = basis === 'last_sale' ? 'last_sale_price' : 'cl_value';
     const sortCol = sort === 'abs' ? 'abs_diff' : 'pct_diff';
 
@@ -79,7 +79,7 @@ export function makeQueries(db) {
     if (direction === 'grader_cheaper') where = 'd.abs_diff > 0';
     else if (direction === 'psa_cheaper') where = 'd.abs_diff < 0';
 
-    const params = { minPrice: minPrice ?? 0, minDiff: minDiff ?? 0, minPctDiff: minPctDiff ?? 0, limit, offset };
+    const params = { maxPrice: maxPrice ?? 0, minDiff: minDiff ?? 0, minPctDiff: minPctDiff ?? 0, limit, offset };
     let playerFilter = '';
     if (playerId) {
       playerFilter = 'AND c.player_id = @playerId';
@@ -129,7 +129,8 @@ export function makeQueries(db) {
       ),
       filtered AS (
         SELECT * FROM comparable d
-        WHERE d.grader_price >= @minPrice AND ABS(d.abs_diff) >= @minDiff
+        WHERE (@maxPrice <= 0 OR d.grader_price <= @maxPrice)
+          AND ABS(d.abs_diff) >= @minDiff
           AND ABS(d.pct_diff) >= @minPctDiff AND ${where}
       )
     `;
