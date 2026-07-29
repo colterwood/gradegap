@@ -5,7 +5,7 @@ const state = {
   playerId: '',
   sortColumn: 'pct_diff', // default: biggest % gaps first
   sortDir: 'desc',
-  colors: { green: true, yellow: true, red: true },
+  colors: { green: true, yellow: true, red: true, gray: true },
 };
 
 // The current, unsorted result set (fetched once per server-side filter change).
@@ -18,8 +18,8 @@ const fmtMoney = (n) =>
 // Card Ladder dates arrive as ISO (2026-05-06T10:00:00.000Z); show just the day.
 const fmtDate = (s) => (s ? String(s).slice(0, 10) : '—');
 
-// Severity order for sorting the color column: green < yellow < red.
-const COLOR_RANK = { green: 0, yellow: 1, red: 2 };
+// Severity order for sorting the color column: green < yellow < red < gray(unknown).
+const COLOR_RANK = { green: 0, yellow: 1, red: 2, gray: 3 };
 
 // --- recency dot -----------------------------------------------------------
 // Months since a YYYY-MM-DD last-sale date; a missing date = never sold.
@@ -37,19 +37,20 @@ function fmtAge(m) {
   return `${(m / 12).toFixed(1)}yr ago`;
 }
 
-// A gap is only as trustworthy as its OLDER price, so the dot is driven by the
-// stalest of the two sides (either grade being stale flags the row):
-//   green = both sold within 3mo · yellow = staler side 3–12mo · red = staler
-//   side >12mo or never sold.
+// Color rules, evaluated against TODAY (SGC = the non-PSA grader):
+//   green = both SGC and PSA last sold <3mo
+//   yellow = both SGC and PSA last sold >12mo
+//   red = SGC last sold >3mo AND PSA last sold <3mo
+//   gray = anything the three rules don't cover (e.g. PSA itself >3mo)
 function recencyDot(row) {
   const sgcM = monthsSince(row.sgc_last_sale_date);
   const psaM = monthsSince(row.psa_last_sale_date);
-  const stalest = Math.max(sgcM, psaM);
 
   let color;
-  if (stalest <= 3) color = 'green';
-  else if (stalest <= 12) color = 'yellow';
-  else color = 'red';
+  if (sgcM < 3 && psaM < 3) color = 'green';
+  else if (sgcM > 12 && psaM > 12) color = 'yellow';
+  else if (sgcM > 3 && psaM < 3) color = 'red';
+  else color = 'gray';
 
   const title = `SGC 10 GM last sold ${fmtAge(sgcM)} · PSA 10 last sold ${fmtAge(psaM)}`;
   return { color, title };
@@ -132,7 +133,9 @@ function renderResults() {
       <td class="num ${diffClass}">${row.abs_diff >= 0 ? '+' : ''}${fmtMoney(row.abs_diff)}</td>
       <td class="num ${diffClass}">${row.pct_diff >= 0 ? '+' : ''}${row.pct_diff}%</td>
       <td class="date">${fmtDate(row.sgc_last_sale_date)}</td>
+      <td class="num">${row.sgc_sales ?? '—'}</td>
       <td class="date">${fmtDate(row.psa_last_sale_date)}</td>
+      <td class="num">${row.psa_sales ?? '—'}</td>
     `;
     tbody.appendChild(tr);
   }
@@ -283,8 +286,9 @@ $('color-filter').addEventListener('change', (e) => {
   renderResults();
 });
 
-$('direction').addEventListener('change', (e) => {
-  state.direction = e.target.value;
+// Grader selector — only SGC for now; PSA is always the compare-to (higher)
+// side. Wired so adding more graders later is a one-line change.
+$('grader').addEventListener('change', () => {
   loadResults().catch((err) => setError(err.message));
 });
 

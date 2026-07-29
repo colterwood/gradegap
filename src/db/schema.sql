@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS grade_prices (
   last_sale_price  REAL,
   last_sale_date   TEXT,
   population       INTEGER,
+  num_sales        INTEGER,
   sync_run_id      INTEGER REFERENCES sync_runs(id),
   captured_at      TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(card_id, grading_company, grade)

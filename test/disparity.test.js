@@ -26,9 +26,9 @@ function seedDb() {
     });
     const cardId = q.getCardByClId.get(clCardId).id;
     if (sgc.v !== null || sgc.s !== null) {
-      q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10', clValue: sgc.v, lastSalePrice: sgc.s, lastSaleDate: '2026-07-01', population: null, syncRunId: null });
+      q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10', clValue: sgc.v, lastSalePrice: sgc.s, lastSaleDate: '2026-07-01', population: null, numSales: null, syncRunId: null });
     }
-    q.upsertGradePrice.run({ cardId, company: 'PSA', grade: '10', clValue: psa.v, lastSalePrice: psa.s, lastSaleDate: '2026-07-02', population: null, syncRunId: null });
+    q.upsertGradePrice.run({ cardId, company: 'PSA', grade: '10', clValue: psa.v, lastSalePrice: psa.s, lastSaleDate: '2026-07-02', population: null, numSales: null, syncRunId: null });
   }
   return { db, q };
 }
@@ -79,19 +79,22 @@ test('direction filters work', () => {
   assert.deepEqual(psaCheaper.rows.map((x) => x.name), ['1989 Hoops #200']);
 });
 
-test('min price filter uses the higher of the two prices', () => {
+test('min price filter uses the SGC price, not the higher of the two', () => {
   const { q } = seedDb();
-  const r = q.resultsQuery({ ...base, minPrice: 200 });
-  // c4 max(50,90)=90 < 200 -> filtered out, but NOT counted as missing-grade
-  assert.equal(r.total, 3);
-  assert.equal(r.excludedMissingGrade, 1);
+  // c2 is SGC 400 / PSA 500. At minPrice 450 an SGC-based filter drops it,
+  // whereas a max-of-both filter would keep it (PSA 500). Only c1 (SGC 1000)
+  // clears the bar.
+  const r = q.resultsQuery({ ...base, minPrice: 450 });
+  assert.deepEqual(r.rows.map((x) => x.name), ['1986 Fleer #57']);
+  assert.equal(r.total, 1);
+  assert.equal(r.excludedMissingGrade, 1); // c5 still missing a grade
 });
 
 test('SGC 10 Pristine rows never enter the Gem Mint comparison', () => {
   const { q } = seedDb();
   const cardId = q.getCardByClId.get('c1').id;
   // a Pristine 10 worth 20x the Gem Mint 10 — must not change the comparison
-  q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10 PRI', clValue: 20000, lastSalePrice: 19500, lastSaleDate: '2026-07-01', population: null, syncRunId: null });
+  q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10 PRI', clValue: 20000, lastSalePrice: 19500, lastSaleDate: '2026-07-01', population: null, numSales: null, syncRunId: null });
   const r = q.resultsQuery(base);
   const c1 = r.rows.find((x) => x.name === '1986 Fleer #57');
   assert.equal(c1.sgc_price, 1000);
@@ -101,7 +104,7 @@ test('SGC 10 Pristine rows never enter the Gem Mint comparison', () => {
 test('upsert replaces prices instead of duplicating', () => {
   const { q } = seedDb();
   const cardId = q.getCardByClId.get('c1').id;
-  q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10', clValue: 1100, lastSalePrice: 1050, lastSaleDate: '2026-07-20', population: null, syncRunId: null });
+  q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10', clValue: 1100, lastSalePrice: 1050, lastSaleDate: '2026-07-20', population: null, numSales: null, syncRunId: null });
   const r = q.resultsQuery(base);
   const c1 = r.rows.find((x) => x.name === '1986 Fleer #57');
   assert.equal(c1.sgc_price, 1100);

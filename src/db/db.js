@@ -12,7 +12,16 @@ export function openDb(dbPath = path.join(config.dataDir, 'gradegap.db')) {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+  // Lightweight migrations: add columns to already-existing tables (CREATE
+  // TABLE IF NOT EXISTS won't alter a table that predates a new column).
+  ensureColumn(db, 'grade_prices', 'population', 'INTEGER');
+  ensureColumn(db, 'grade_prices', 'num_sales', 'INTEGER');
   return db;
+}
+
+function ensureColumn(db, table, column, type) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 export function syncPlayersFromConfig(db, players) {

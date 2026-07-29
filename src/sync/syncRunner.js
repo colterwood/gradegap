@@ -45,6 +45,7 @@ export function createSyncManager(db, q) {
       lastSalePrice: parsed.price.lastSalePrice,
       lastSaleDate: parsed.price.lastSaleDate,
       population: parsed.price.population,
+      numSales: parsed.price.numSales,
       syncRunId: runId,
     });
     return true;

@@ -134,6 +134,7 @@ td a:hover { text-decoration: underline; }
 .dot-green { background: #2e9e5b; }
 .dot-yellow { background: #e0a400; }
 .dot-red { background: #d64545; }
+.dot-gray { background: #9aa3b2; }
 
 /* sortable headers */
 th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }

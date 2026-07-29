@@ -18,13 +18,14 @@ export function makeQueries(db) {
   `);
 
   const upsertGradePrice = db.prepare(`
-    INSERT INTO grade_prices (card_id, grading_company, grade, cl_value, last_sale_price, last_sale_date, population, sync_run_id, captured_at)
-    VALUES (@cardId, @company, @grade, @clValue, @lastSalePrice, @lastSaleDate, @population, @syncRunId, datetime('now'))
+    INSERT INTO grade_prices (card_id, grading_company, grade, cl_value, last_sale_price, last_sale_date, population, num_sales, sync_run_id, captured_at)
+    VALUES (@cardId, @company, @grade, @clValue, @lastSalePrice, @lastSaleDate, @population, @numSales, @syncRunId, datetime('now'))
     ON CONFLICT(card_id, grading_company, grade) DO UPDATE SET
       cl_value = excluded.cl_value,
       last_sale_price = excluded.last_sale_price,
       last_sale_date = excluded.last_sale_date,
       population = excluded.population,
+      num_sales = excluded.num_sales,
       sync_run_id = excluded.sync_run_id,
       captured_at = excluded.captured_at
   `);
@@ -69,7 +70,9 @@ export function makeQueries(db) {
           sgc.cl_value AS sgc_cl_value,
           psa.cl_value AS psa_cl_value,
           sgc.population AS sgc_pop,
-          psa.population AS psa_pop
+          psa.population AS psa_pop,
+          sgc.num_sales AS sgc_sales,
+          psa.num_sales AS psa_sales
         FROM cards c
         LEFT JOIN players p ON p.id = c.player_id
         LEFT JOIN grade_prices sgc ON sgc.card_id = c.id
@@ -88,7 +91,7 @@ export function makeQueries(db) {
       ),
       filtered AS (
         SELECT * FROM comparable d
-        WHERE MAX(d.sgc_price, d.psa_price) >= @minPrice AND ${where}
+        WHERE d.sgc_price >= @minPrice AND ${where}
       )
     `;
 

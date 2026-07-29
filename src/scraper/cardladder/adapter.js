@@ -267,6 +267,7 @@ export function parseLadderHit(hit) {
       lastSalePrice,
       lastSaleDate: hit.lastSoldDate ?? null,
       population: hit.pop != null ? toNumber(hit.pop) : null,
+      numSales: hit.numSales != null ? toNumber(hit.numSales) : null,
     },
   };
 }
