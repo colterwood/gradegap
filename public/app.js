@@ -37,24 +37,21 @@ function fmtAge(m) {
   return `${(m / 12).toFixed(1)}yr ago`;
 }
 
-// Yellow-first precedence so all three tiers are reachable:
-//   yellow = both sides last sold >12mo · red = the cheaper (direction) side
-//   >3mo or never · green = otherwise.
+// A gap is only as trustworthy as its OLDER price, so the dot is driven by the
+// stalest of the two sides (either grade being stale flags the row):
+//   green = both sold within 3mo · yellow = staler side 3–12mo · red = staler
+//   side >12mo or never sold.
 function recencyDot(row) {
   const sgcM = monthsSince(row.sgc_last_sale_date);
   const psaM = monthsSince(row.psa_last_sale_date);
-  const cheaperIsSgc = row.sgc_price <= row.psa_price;
-  const dirM = cheaperIsSgc ? sgcM : psaM;
+  const stalest = Math.max(sgcM, psaM);
 
   let color;
-  if (sgcM > 12 && psaM > 12) color = 'yellow';
-  else if (dirM > 3) color = 'red';
-  else color = 'green';
+  if (stalest <= 3) color = 'green';
+  else if (stalest <= 12) color = 'yellow';
+  else color = 'red';
 
-  const cheapLabel = cheaperIsSgc ? 'SGC' : 'PSA';
-  const title =
-    `SGC 10 GM last sold ${fmtAge(sgcM)} · PSA 10 last sold ${fmtAge(psaM)}` +
-    ` — dot tracks the cheaper side (${cheapLabel})`;
+  const title = `SGC 10 GM last sold ${fmtAge(sgcM)} · PSA 10 last sold ${fmtAge(psaM)}`;
   return { color, title };
 }
 
