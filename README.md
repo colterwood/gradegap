@@ -96,6 +96,46 @@ npm start          # → http://localhost:4000, click Sync when you want fresh d
 - If Card Ladder logs you out mid-sync, the run stops with a message — just
   `npm run login` again and Resume.
 
+## Marketplace watcher
+
+Tick the **Watch** box on any row of the results table and GradeGap will hunt
+live marketplaces for that exact card + slab (e.g. "1986 Fleer Jordan #57
+SGC 10") on a schedule, while the app is running. Everything found lands in
+the **Watched** tab: which site, current price (shown in USD; other
+currencies converted at daily rates), auction vs Buy It Now, and — for
+auctions — the end time with a live countdown. Each listing carries a match
+confidence score: titles that fail the hard checks (year, player, exact
+grader+grade) are discarded outright, everything else is kept and low
+scorers are highlighted so *you* make the final call (Dismiss clears them).
+
+- **Checking cadence**: every `WATCH_INTERVAL_MIN` minutes (default 30)
+  while the server runs, plus a **Check now** button. Set `0` for
+  manual-only.
+- **Phone pushes** (optional): install the [ntfy](https://ntfy.sh) app,
+  subscribe to a long random topic name, and set `NTFY_TOPIC` in `.env`.
+  You get one aggregate push per check when new listings appear ("7 new
+  listings for your GradeGap watchlist") and one reminder when watched
+  auctions enter their last `WATCH_REMIND_MIN` minutes (default 24h).
+- **Sources** (`WATCH_SOURCES`): each marketplace is a small adapter under
+  `src/marketplace/sources/`. Shipping today:
+  - `ebay` — the official eBay Browse API (no scraping) across the US,
+    Canadian, UK, German, French, and Italian marketplaces
+    (`EBAY_MARKETPLACES`). Needs a free developer keyset — see
+    `.env.example`.
+  - `shopify` — a generic adapter for any Shopify card shop's public search
+    (built for the Canadian shops: Flip Collectibles, Mintink, Overtime, …);
+    list domains in `SHOPIFY_SHOPS`.
+  - More (Goldin, Heritage, Fanatics Collect, Pristine, CIA, COMC, MySlabs,
+    HiBid, Catawiki, …) slot in behind the same interface — the plan lives in
+    the repo history; each one is a single new file in
+    `src/marketplace/sources/` plus a `WATCH_SOURCES` entry.
+- **Per-watch cap**: the Watched tab's *Max $* column skips new listings
+  above a USD price; the *On* toggle pauses a watch without losing its
+  listing history; ✕ deletes the watch and its history (unticking the Watch
+  box does the same).
+- Mock mode (`npm run mock`) includes a fixture marketplace, so the whole
+  watch → check → matches flow works with zero credentials.
+
 ## Scoping to specific players (optional)
 
 By default the sync covers the **whole catalog** (every card with an SGC 10
@@ -121,13 +161,17 @@ npm test           # disparity math, sync/resume/cancel, and parser tests
 ## Layout
 
 ```
-src/db/          schema + all SQL (disparity ranking is a single query)
-src/sync/        sync orchestration: work queue, progress, resume, cancel
-src/scraper/     browser session, network capture, and the Card Ladder
-                 adapter (endpoints.js + adapter.js = the only files that
-                 know Card Ladder's response shapes)
-src/scraper/mock fixture-based fake Card Ladder for development
-public/          the web UI (no build step)
+src/db/            schema + all SQL (disparity ranking is a single query)
+src/sync/          sync orchestration: work queue, progress, resume, cancel
+src/scraper/       browser session, network capture, and the Card Ladder
+                   adapter (endpoints.js + adapter.js = the only files that
+                   know Card Ladder's response shapes)
+src/scraper/mock   fixture-based fake Card Ladder for development
+src/marketplace/   the watcher: match.js (query building + title scoring),
+                   watchRunner.js (scheduler + work queue + notifications),
+                   fx.js (USD conversion), notify.js (ntfy pushes), and
+                   sources/ (one small adapter per marketplace + mock)
+public/            the web UI (no build step)
 ```
 
 ## A note on Card Ladder's terms

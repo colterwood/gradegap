@@ -71,6 +71,11 @@ function recencyDot(row) {
   return { color, title };
 }
 
+// Watches keyed "cardId|grader|grade" → watch row (drives the Watch
+// checkboxes in the results table and the Watched tab).
+const watchByKey = new Map();
+const watchKey = (cardId, grader, grade) => `${cardId}|${grader}|${grade}`;
+
 let pollTimer = null;
 let wasRunning = false;
 
@@ -161,7 +166,10 @@ function renderResults() {
     const link = row.cl_url
       ? `<a href="${esc(row.cl_url)}" target="_blank" rel="noopener">${esc(row.name)}</a>`
       : esc(row.name);
+    const watched = watchByKey.has(watchKey(row.card_id, row.grader, row.grade));
     tr.innerHTML = `
+      <td class="watch-cell"><input type="checkbox" class="watch-cb" ${watched ? 'checked' : ''}
+        data-card-id="${row.card_id}" data-grader="${esc(row.grader)}" data-grade="${esc(row.grade)}" /></td>
       <td class="dot-cell"><span class="dot dot-${row._dot.color}" title="${row._dot.title}"></span></td>
       <td>${link}</td>
       <td class="num grade-cell">${row.grade ?? '—'}</td>
@@ -423,13 +431,284 @@ $('sync-btn').addEventListener('click', () => triggerSync(false));
 $('resume-btn').addEventListener('click', () => triggerSync(true));
 $('cancel-btn').addEventListener('click', () => api('/api/sync/cancel', { method: 'POST' }).catch(() => {}));
 
+// --- marketplace watcher ---------------------------------------------------
+
+let currentView = 'disparity';
+let checkPollTimer = null;
+let checkWasRunning = false;
+
+async function loadWatches() {
+  const watches = await api('/api/watches');
+  watchByKey.clear();
+  for (const w of watches) watchByKey.set(watchKey(w.card_id, w.grading_company, w.grade), w);
+  renderWatches(watches);
+  return watches;
+}
+
+// Tick/untick a Watch checkbox in the results table. Unticking deletes the
+// watch AND its listing history (pausing is the Watched tab's On toggle).
+document.querySelector('#results tbody').addEventListener('change', async (e) => {
+  const cb = e.target.closest('input.watch-cb');
+  if (!cb) return;
+  const key = watchKey(cb.dataset.cardId, cb.dataset.grader, cb.dataset.grade);
+  cb.disabled = true;
+  try {
+    if (cb.checked) {
+      await api('/api/watches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cardId: Number(cb.dataset.cardId), gradingCompany: cb.dataset.grader, grade: cb.dataset.grade }),
+      });
+    } else {
+      const existing = watchByKey.get(key);
+      if (existing) await api(`/api/watches/${existing.id}`, { method: 'DELETE' });
+    }
+    await loadWatches();
+    await refreshWatchBadge();
+  } catch (err) {
+    setError(err.message);
+    cb.checked = !cb.checked;
+  } finally {
+    cb.disabled = false;
+  }
+});
+
+// --- tabs ---
+
+function switchView(view) {
+  currentView = view;
+  for (const btn of document.querySelectorAll('.tabs .tab')) {
+    btn.classList.toggle('active', btn.dataset.view === view);
+  }
+  $('view-disparity').hidden = view !== 'disparity';
+  $('view-watched').hidden = view !== 'watched';
+  if (view === 'watched') {
+    loadWatchedView().catch((err) => setError(err.message));
+  }
+}
+
+document.querySelector('.tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab');
+  if (btn) switchView(btn.dataset.view);
+});
+
+// --- watched view ---
+
+// Listing times are SQLite "YYYY-MM-DD HH:MM:SS" (UTC).
+const parseSqlDate = (s) => (s ? new Date(s.replace(' ', 'T') + 'Z') : null);
+
+function fmtTimeLeft(endsAt) {
+  const d = parseSqlDate(endsAt);
+  if (!d || isNaN(d.getTime())) return '';
+  const ms = d.getTime() - Date.now();
+  if (ms <= 0) return 'ended';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m left`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${mins % 60}m left`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h left`;
+}
+
+// Card names ("1986 Fleer Michael Jordan #57") already carry year/set/number.
+const watchLabel = (w) => `${w.card_name} · ${w.grading_company} ${w.grade}`;
+
+function renderWatches(watches) {
+  const tbody = document.querySelector('#watches-table tbody');
+  tbody.innerHTML = '';
+  for (const w of watches) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${esc(w.card_name)}</td>
+      <td class="grade-cell">${esc(w.grading_company)} ${esc(w.grade)}</td>
+      <td class="num"><input type="number" class="watch-max-price" data-id="${w.id}" min="0" step="50"
+        value="${w.max_price ?? ''}" placeholder="—" /></td>
+      <td class="num">${w.active_listings}</td>
+      <td class="date">${w.last_checked_at ? esc(w.last_checked_at) + ' UTC' : 'never'}</td>
+      <td><input type="checkbox" class="watch-enabled" data-id="${w.id}" ${w.enabled ? 'checked' : ''} /></td>
+      <td><button class="link-btn watch-delete" data-id="${w.id}" title="Delete this watch and its listing history">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+  $('watches-table').hidden = watches.length === 0;
+  $('watches-empty').hidden = watches.length > 0;
+}
+
+function renderMatches(matches) {
+  const tbody = document.querySelector('#matches-table tbody');
+  tbody.innerHTML = '';
+  for (const m of matches) {
+    const tr = document.createElement('tr');
+    if (m.status === 'ended' || m.status === 'dismissed') tr.classList.add('listing-inactive');
+    const title = m.url
+      ? `<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>`
+      : esc(m.title);
+    const score = m.match_score == null ? '—' : `${Math.round(m.match_score * 100)}%`;
+    const low = m.match_score != null && m.match_score < 0.7;
+    const ends = m.listing_type === 'auction' && m.ends_at
+      ? `<span class="date">${esc(m.ends_at)}</span><br /><span class="time-left">${fmtTimeLeft(m.ends_at)}</span>`
+      : '—';
+    tr.innerHTML = `
+      <td><span class="source-badge">${esc(m.source)}</span></td>
+      <td class="listing-title">${title}${m.seller ? `<div class="seller">${esc(m.seller)}</div>` : ''}</td>
+      <td class="watch-ref">${esc(watchLabel(m))}</td>
+      <td class="num">${fmtMoney(m.price_usd ?? m.price)}${m.currency && m.currency !== 'USD' ? `<div class="native-price">${esc(String(m.price))} ${esc(m.currency)}</div>` : ''}</td>
+      <td>${m.listing_type === 'auction' ? 'Auction' : 'Buy It Now'}</td>
+      <td>${ends}</td>
+      <td class="num">${low ? `<span class="score-low" title="Low-confidence match — verify before trusting">${score}</span>` : score}</td>
+      <td>${m.status === 'dismissed' ? '' : `<button class="link-btn match-dismiss" data-id="${m.id}">Dismiss</button>`}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  $('matches-table').hidden = matches.length === 0;
+  const empty = $('matches-empty');
+  empty.hidden = matches.length > 0;
+  if (matches.length === 0) {
+    empty.textContent = 'No listings matched yet — hit Check now, or wait for the next scheduled check.';
+  }
+  const live = matches.filter((m) => m.status === 'new' || m.status === 'notified').length;
+  $('matches-summary').textContent = `${live} live listing${live === 1 ? '' : 's'}` +
+    (matches.length !== live ? ` · ${matches.length - live} ended/dismissed shown` : '');
+}
+
+async function loadWatchedView() {
+  const watches = await loadWatches();
+  const statuses = $('show-ended').checked ? 'new,notified,dismissed,ended' : 'new,notified';
+  const matches = await api(`/api/matches?status=${statuses}`);
+  renderMatches(matches);
+  await refreshCheckStatus();
+  return watches;
+}
+
+document.querySelector('#watches-table tbody').addEventListener('change', async (e) => {
+  const enabled = e.target.closest('input.watch-enabled');
+  const maxPrice = e.target.closest('input.watch-max-price');
+  try {
+    if (enabled) {
+      await api(`/api/watches/${enabled.dataset.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: enabled.checked }),
+      });
+    } else if (maxPrice) {
+      await api(`/api/watches/${maxPrice.dataset.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxPrice: maxPrice.value === '' ? null : parseFloat(maxPrice.value) }),
+      });
+    }
+  } catch (err) {
+    setError(err.message);
+  }
+});
+
+document.querySelector('#watches-table tbody').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button.watch-delete');
+  if (!btn) return;
+  if (!confirm('Delete this watch and its listing history?')) return;
+  try {
+    await api(`/api/watches/${btn.dataset.id}`, { method: 'DELETE' });
+    await loadWatchedView();
+    await loadResults().catch(() => {});
+  } catch (err) {
+    setError(err.message);
+  }
+});
+
+document.querySelector('#matches-table tbody').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button.match-dismiss');
+  if (!btn) return;
+  try {
+    await api(`/api/matches/${btn.dataset.id}/dismiss`, { method: 'POST' });
+    await loadWatchedView();
+    await refreshWatchBadge();
+  } catch (err) {
+    setError(err.message);
+  }
+});
+
+$('show-ended').addEventListener('change', () => loadWatchedView().catch((err) => setError(err.message)));
+
+// --- check-now + status ---
+
+async function refreshCheckStatus() {
+  const s = await api('/api/watch-check/status');
+
+  $('check-btn').disabled = s.running;
+  $('check-cancel-btn').hidden = !s.running;
+  $('check-progress').hidden = !s.running;
+  if (s.running && s.run) {
+    const { items_total, items_processed } = s.run;
+    const label = s.currentLabel || 'Starting…';
+    $('check-progress-text').textContent = `${label}   ·   ${items_processed} / ${items_total} checks`;
+  }
+  if (!s.running && s.run) {
+    if (s.run.status === 'completed') {
+      const failed = s.run.items_failed ? ` · ${s.run.items_failed} failed` : '';
+      $('check-info').textContent = `Last checked ${s.run.finished_at} UTC · ${s.run.new_listings} new${failed}`;
+    } else if (s.run.status === 'failed') {
+      setError(`Last check failed: ${s.run.error ?? s.lastError ?? 'unknown error'}`);
+    }
+  }
+  updateBadge(s.newCount);
+
+  if (checkWasRunning && !s.running) {
+    clearInterval(checkPollTimer);
+    checkPollTimer = null;
+    await loadWatchedView().catch(() => {});
+  }
+  checkWasRunning = s.running;
+  return s;
+}
+
+function updateBadge(n) {
+  const badge = $('watched-badge');
+  badge.hidden = !n;
+  badge.textContent = n || '';
+}
+
+async function refreshWatchBadge() {
+  try {
+    const s = await api('/api/watch-check/status');
+    updateBadge(s.newCount);
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+$('check-btn').addEventListener('click', async () => {
+  setError('');
+  try {
+    await api('/api/watch-check', { method: 'POST' });
+    checkWasRunning = true;
+    await refreshCheckStatus();
+    if (!checkPollTimer) checkPollTimer = setInterval(() => refreshCheckStatus().catch(() => {}), 2000);
+  } catch (err) {
+    setError(err.message);
+  }
+});
+
+$('check-cancel-btn').addEventListener('click', () => api('/api/watch-check/cancel', { method: 'POST' }).catch(() => {}));
+
 (async function init() {
   try {
     await loadConfig();
     await loadPlayers();
+    await loadWatches().catch(() => {});
     const s = await refreshStatus();
     if (s.running) startPolling();
     await loadResults();
+    const cs = await refreshWatchBadge();
+    // Scheduled checks run server-side; a slow poll keeps the badge and any
+    // in-flight check visible even if this tab never triggered it.
+    if (cs?.running && !checkPollTimer) {
+      checkWasRunning = true;
+      checkPollTimer = setInterval(() => refreshCheckStatus().catch(() => {}), 2000);
+    }
+    setInterval(() => {
+      (currentView === 'watched' ? refreshCheckStatus() : refreshWatchBadge()).catch(() => {});
+    }, 30000);
+    if (location.hash === '#watched') switchView('watched');
   } catch (err) {
     setError(err.message);
   }

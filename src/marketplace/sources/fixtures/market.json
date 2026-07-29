@@ -1,0 +1,86 @@
+[
+  {
+    "listingId": "mkt-auction-1",
+    "canonicalKey": "ebay:401",
+    "title": "1986 Fleer Michael Jordan #57 Rookie RC SGC 10 GEM MINT",
+    "url": "https://example.com/listing/mkt-auction-1",
+    "price": 25995,
+    "currency": "USD",
+    "listingType": "auction",
+    "endsAt": "2030-06-01T18:00:00Z",
+    "imageUrl": null,
+    "seller": "mock-auction-house"
+  },
+  {
+    "listingId": "mkt-fixed-cad",
+    "canonicalKey": null,
+    "title": "1986-87 Fleer Michael Jordan Rookie #57 SGC 10",
+    "url": "https://example.com/listing/mkt-fixed-cad",
+    "price": 36000,
+    "currency": "CAD",
+    "listingType": "fixed",
+    "endsAt": null,
+    "imageUrl": null,
+    "seller": "mock-canadian-shop"
+  },
+  {
+    "listingId": "mkt-wrong-grade",
+    "canonicalKey": null,
+    "title": "1986 Fleer Michael Jordan #57 SGC 9 sharp corners",
+    "url": "https://example.com/listing/mkt-wrong-grade",
+    "price": 7000,
+    "currency": "USD",
+    "listingType": "fixed",
+    "endsAt": null,
+    "imageUrl": null,
+    "seller": "mock-shop"
+  },
+  {
+    "listingId": "mkt-reprint",
+    "canonicalKey": null,
+    "title": "1986 Fleer Michael Jordan #57 REPRINT SGC 10",
+    "url": "https://example.com/listing/mkt-reprint",
+    "price": 49,
+    "currency": "USD",
+    "listingType": "fixed",
+    "endsAt": null,
+    "imageUrl": null,
+    "seller": "mock-shop"
+  },
+  {
+    "listingId": "mkt-ended-auction",
+    "canonicalKey": null,
+    "title": "1986 Fleer Michael Jordan RC #57 SGC 10 last chance",
+    "url": "https://example.com/listing/mkt-ended-auction",
+    "price": 24000,
+    "currency": "USD",
+    "listingType": "auction",
+    "endsAt": "2020-01-01T00:00:00Z",
+    "imageUrl": null,
+    "seller": "mock-auction-house"
+  },
+  {
+    "listingId": "mkt-psa-side",
+    "canonicalKey": null,
+    "title": "1986 Fleer Michael Jordan #57 PSA 10 GEM MT",
+    "url": "https://example.com/listing/mkt-psa-side",
+    "price": 174000,
+    "currency": "USD",
+    "listingType": "fixed",
+    "endsAt": null,
+    "imageUrl": null,
+    "seller": "mock-vault"
+  },
+  {
+    "listingId": "mkt-other-player",
+    "canonicalKey": null,
+    "title": "1986 Fleer Sticker Larry Bird #2 SGC 10",
+    "url": "https://example.com/listing/mkt-other-player",
+    "price": 900,
+    "currency": "USD",
+    "listingType": "fixed",
+    "endsAt": null,
+    "imageUrl": null,
+    "seller": "mock-shop"
+  }
+]

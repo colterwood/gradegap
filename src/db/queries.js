@@ -209,5 +209,134 @@ export function makeQueries(db) {
     markSyncItem: db.prepare(`
       UPDATE sync_items SET status = @status, attempts = attempts + 1, error = @error WHERE id = @id
     `),
+
+    // --- marketplace watcher ------------------------------------------------
+
+    // Re-watching a previously-watched combo re-enables it instead of erroring.
+    insertWatch: db.prepare(`
+      INSERT INTO watches (card_id, grading_company, grade, max_price)
+      VALUES (@cardId, @gradingCompany, @grade, @maxPrice)
+      ON CONFLICT(card_id, grading_company, grade) DO UPDATE SET enabled = 1
+    `),
+    getWatch: db.prepare(`SELECT * FROM watches WHERE id = ?`),
+    getWatchByKey: db.prepare(`SELECT * FROM watches WHERE card_id = ? AND grading_company = ? AND grade = ?`),
+    // Card/player fields ride along for query building and the management UI.
+    listWatches: db.prepare(`
+      SELECT w.*, c.name AS card_name, c.set_name, c.year, c.card_number, c.parallel,
+             p.name AS player_name,
+             (SELECT COUNT(*) FROM listings l WHERE l.watch_id = w.id AND l.status IN ('new','notified')) AS active_listings
+      FROM watches w
+      JOIN cards c ON c.id = w.card_id
+      LEFT JOIN players p ON p.id = c.player_id
+      ORDER BY w.id DESC
+    `),
+    listEnabledWatches: db.prepare(`
+      SELECT w.*, c.name AS card_name, c.set_name, c.year, c.card_number, c.parallel,
+             p.name AS player_name
+      FROM watches w
+      JOIN cards c ON c.id = w.card_id
+      LEFT JOIN players p ON p.id = c.player_id
+      WHERE w.enabled = 1
+      ORDER BY w.id
+    `),
+    countEnabledWatches: db.prepare(`SELECT COUNT(*) AS n FROM watches WHERE enabled = 1`),
+    setWatchEnabled: db.prepare(`UPDATE watches SET enabled = ? WHERE id = ?`),
+    setWatchMaxPrice: db.prepare(`UPDATE watches SET max_price = ? WHERE id = ?`),
+    touchWatchChecked: db.prepare(`UPDATE watches SET last_checked_at = datetime('now') WHERE id = ?`),
+    deleteWatchListings: db.prepare(`DELETE FROM listings WHERE watch_id = ?`),
+    deleteWatchItems: db.prepare(`DELETE FROM watch_check_items WHERE watch_id = ?`),
+    deleteWatch: db.prepare(`DELETE FROM watches WHERE id = ?`),
+
+    getListingByKey: db.prepare(`SELECT * FROM listings WHERE source = ? AND listing_id = ?`),
+    getListingByCanonical: db.prepare(`SELECT * FROM listings WHERE canonical_key = ?`),
+    insertListing: db.prepare(`
+      INSERT INTO listings (watch_id, source, listing_id, canonical_key, title, url, price, currency,
+                            price_usd, listing_type, ends_at, image_url, seller, match_score, match_debug)
+      VALUES (@watchId, @source, @listingId, @canonicalKey, @title, @url, @price, @currency,
+              @priceUsd, @listingType, @endsAt, @imageUrl, @seller, @matchScore, @matchDebug)
+    `),
+    // A re-sighting refreshes the live fields and resets the staleness counter.
+    refreshListing: db.prepare(`
+      UPDATE listings SET title = @title, price = @price, currency = @currency, price_usd = @priceUsd,
+        ends_at = COALESCE(@endsAt, ends_at), misses = 0, last_seen_at = datetime('now')
+      WHERE id = @id
+    `),
+    listMatches: db.prepare(`
+      SELECT l.*, w.grading_company, w.grade, w.card_id,
+             c.name AS card_name, p.name AS player_name
+      FROM listings l
+      JOIN watches w ON w.id = l.watch_id
+      JOIN cards c ON c.id = w.card_id
+      LEFT JOIN players p ON p.id = c.player_id
+      WHERE (@watchId IS NULL OR l.watch_id = @watchId)
+        AND instr(@statuses, '|' || l.status || '|') > 0
+      ORDER BY l.found_at DESC, l.id DESC
+      LIMIT @limit
+    `),
+    countActiveMatches: db.prepare(`SELECT COUNT(*) AS n FROM listings WHERE status IN ('new','notified')`),
+    setListingStatus: db.prepare(`UPDATE listings SET status = ? WHERE id = ?`),
+    listNewListings: db.prepare(`SELECT * FROM listings WHERE status = 'new' ORDER BY id`),
+    markEndedAuctions: db.prepare(`
+      UPDATE listings SET status = 'ended'
+      WHERE listing_type = 'auction' AND ends_at IS NOT NULL AND ends_at < datetime('now')
+        AND status IN ('new','notified')
+    `),
+    // Staleness for fixed-price listings (they never "end" on their own): a
+    // successful (watch, source) check that didn't see a listing bumps its
+    // miss counter; 3 consecutive misses = sold/delisted.
+    bumpListingMisses: db.prepare(`
+      UPDATE listings SET misses = misses + 1
+      WHERE watch_id = @watchId AND source = @source AND listing_type = 'fixed'
+        AND status IN ('new','notified') AND last_seen_at < @runStartedAt
+    `),
+    markStaleListingsEnded: db.prepare(`
+      UPDATE listings SET status = 'ended' WHERE misses >= 3 AND status IN ('new','notified')
+    `),
+    // Auctions entering the ending-soon window that haven't had their
+    // reminder push yet. @minutes is concatenated into the datetime modifier
+    // string, which SQLite allows as an expression.
+    reminderCandidates: db.prepare(`
+      SELECT * FROM listings
+      WHERE listing_type = 'auction' AND status IN ('new','notified') AND reminder_sent = 0
+        AND ends_at IS NOT NULL AND ends_at > datetime('now')
+        AND ends_at <= datetime('now', '+' || @minutes || ' minutes')
+      ORDER BY ends_at
+    `),
+    markListingReminded: db.prepare(`UPDATE listings SET reminder_sent = 1 WHERE id = ?`),
+
+    createWatchRun: db.prepare(`INSERT INTO watch_check_runs (trigger_kind) VALUES (?)`),
+    getWatchRun: db.prepare(`SELECT * FROM watch_check_runs WHERE id = ?`),
+    latestWatchRun: db.prepare(`SELECT * FROM watch_check_runs ORDER BY id DESC LIMIT 1`),
+    latestStaleWatchRun: db.prepare(`SELECT * FROM watch_check_runs WHERE status = 'running' ORDER BY id DESC LIMIT 1`),
+    updateWatchRunTotals: db.prepare(`UPDATE watch_check_runs SET items_total = @total WHERE id = @id`),
+    bumpWatchRunProgress: db.prepare(`
+      UPDATE watch_check_runs SET items_processed = items_processed + 1,
+        items_failed = items_failed + @failedDelta
+      WHERE id = @id
+    `),
+    addWatchRunNewListings: db.prepare(`UPDATE watch_check_runs SET new_listings = new_listings + ? WHERE id = ?`),
+    finishWatchRun: db.prepare(`
+      UPDATE watch_check_runs SET status = @status, error = @error, finished_at = datetime('now') WHERE id = @id
+    `),
+    insertWatchItem: db.prepare(`
+      INSERT INTO watch_check_items (run_id, watch_id, source) VALUES (?, ?, ?)
+      ON CONFLICT(run_id, watch_id, source) DO NOTHING
+    `),
+    pendingWatchItems: db.prepare(`SELECT * FROM watch_check_items WHERE run_id = ? AND status = 'pending' ORDER BY id`),
+    markWatchItem: db.prepare(`
+      UPDATE watch_check_items SET status = @status, attempts = attempts + 1, error = @error WHERE id = @id
+    `),
+
+    ensureSourceState: db.prepare(`INSERT INTO source_state (source) VALUES (?) ON CONFLICT(source) DO NOTHING`),
+    getSourceState: db.prepare(`SELECT * FROM source_state WHERE source = ?`),
+    setSourceBackoff: db.prepare(`UPDATE source_state SET backoff_until = ? WHERE source = ?`),
+    setSourceAuth: db.prepare(`UPDATE source_state SET auth_json = ? WHERE source = ?`),
+    touchSource: db.prepare(`UPDATE source_state SET last_request_at = datetime('now') WHERE source = ?`),
+
+    kvGet: db.prepare(`SELECT value, updated_at FROM kv_cache WHERE key = ?`),
+    kvSet: db.prepare(`
+      INSERT INTO kv_cache (key, value, updated_at) VALUES (?, ?, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `),
   };
 }

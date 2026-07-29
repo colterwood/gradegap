@@ -28,6 +28,12 @@
 
   <div id="error-banner" class="error-banner" hidden></div>
 
+  <nav class="tabs">
+    <button class="tab active" data-view="disparity">Disparity</button>
+    <button class="tab" data-view="watched">Watched <span id="watched-badge" class="badge" hidden></span></button>
+  </nav>
+
+  <div id="view-disparity">
   <section class="controls">
     <div class="control">
       <label>Price basis</label>
@@ -86,6 +92,7 @@
     <table id="results">
       <thead>
         <tr>
+          <th class="watch-col" title="Watch this card + slab: marketplaces are scanned for it and new listings appear under Watched">Watch</th>
           <th class="dot-col sortable" data-col="color" data-type="color" title="Liquidity — how recently each side last sold — click to sort"><span class="hcell"><span class="arrow"></span></span></th>
           <th class="sortable" data-col="name" data-type="text"><span class="hcell">Card<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="grade" data-type="num"><span class="hcell">Grade<span class="arrow"></span></span></th>
@@ -105,6 +112,62 @@
     <!-- Message text is owned by renderResults() in app.js. -->
     <p id="empty" class="empty" hidden></p>
   </main>
+  </div>
+
+  <div id="view-watched" hidden>
+    <main>
+      <div class="watched-head">
+        <h2>Watched cards</h2>
+        <div class="sync">
+          <span id="check-info" class="sync-info"></span>
+          <button id="check-btn">Check now</button>
+          <button id="check-cancel-btn" class="secondary" hidden>Cancel</button>
+        </div>
+      </div>
+      <div id="check-progress" class="progress progress-inline" hidden>
+        <span id="check-progress-text"></span>
+      </div>
+
+      <table id="watches-table">
+        <thead>
+          <tr>
+            <th>Card</th>
+            <th>Slab</th>
+            <th class="num" title="Skip new listings above this USD price (blank = no cap)">Max $</th>
+            <th class="num" title="Live listings currently matched">Listings</th>
+            <th>Last checked</th>
+            <th title="Pause checking without losing listing history">On</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="watches-empty" class="empty" hidden>
+        No watched cards yet — tick the <strong>Watch</strong> box on a row in the Disparity tab.
+      </p>
+
+      <div class="summary-row matches-head">
+        <p class="summary" id="matches-summary"></p>
+        <label class="show-ended"><input type="checkbox" id="show-ended" /> Show ended &amp; dismissed</label>
+      </div>
+      <table id="matches-table">
+        <thead>
+          <tr>
+            <th>Site</th>
+            <th>Listing</th>
+            <th>Watched card</th>
+            <th class="num">Price (USD)</th>
+            <th>Type</th>
+            <th title="Auction end time (UTC) and time remaining">Ends</th>
+            <th class="num" title="How closely the listing title matches the card">Match</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="matches-empty" class="empty" hidden></p>
+    </main>
+  </div>
 
   <script src="app.js"></script>
 </body>

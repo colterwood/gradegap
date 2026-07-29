@@ -11,6 +11,10 @@ function intEnv(name, fallback) {
   return Number.isFinite(v) ? v : fallback;
 }
 
+function listEnv(name, fallback) {
+  return (process.env[name] ?? fallback).split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 // PSA is always the baseline (compare-to) side of every comparison.
 export const BASELINE_COMPANY = 'PSA';
 
@@ -49,6 +53,22 @@ export const config = {
   pageDelayMs: intEnv('PAGE_DELAY_MS', 1200),
   clEmail: process.env.CL_EMAIL || '',
   clPassword: process.env.CL_PASSWORD || '',
+  // Marketplace watcher. Interval 0 = manual "Check now" only. Sources are
+  // adapter names under src/marketplace/sources/ (mock mode overrides to the
+  // fixture-backed source). Prices are displayed in USD; non-USD listings are
+  // converted at daily rates.
+  watchIntervalMin: intEnv('WATCH_INTERVAL_MIN', 30),
+  watchRemindMin: intEnv('WATCH_REMIND_MIN', 1440),
+  watchSources: listEnv('WATCH_SOURCES', 'ebay'),
+  ebayClientId: process.env.EBAY_CLIENT_ID || '',
+  ebayClientSecret: process.env.EBAY_CLIENT_SECRET || '',
+  ebayEnv: process.env.EBAY_ENV || 'production',
+  ebayMarketplaces: listEnv('EBAY_MARKETPLACES', 'EBAY_US,EBAY_CA,EBAY_GB,EBAY_DE,EBAY_FR,EBAY_IT'),
+  // Generic Shopify-shop adapter: "domain" or "domain:CUR" entries, e.g.
+  // "flipcollect.com:CAD,mintink.ca:CAD" (currency defaults to CAD).
+  shopifyShops: listEnv('SHOPIFY_SHOPS', ''),
+  ntfyTopic: process.env.NTFY_TOPIC || '',
+  ntfyServer: process.env.NTFY_SERVER || 'https://ntfy.sh',
   dataDir: path.join(ROOT, 'data'),
   capturesDir: path.join(ROOT, 'captures'),
   profileDir: path.join(ROOT, 'profile'),

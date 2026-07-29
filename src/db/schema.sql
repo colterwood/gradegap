@@ -64,8 +64,104 @@ CREATE TABLE IF NOT EXISTS sync_items (
   UNIQUE(sync_run_id, cl_card_id)
 );
 
+-- ============ marketplace watcher ============
+
+-- One row per watched (card, grading company, grade), flagged from the
+-- disparity table. max_price is a USD cap on matched listings (NULL = none).
+CREATE TABLE IF NOT EXISTS watches (
+  id               INTEGER PRIMARY KEY,
+  card_id          INTEGER NOT NULL REFERENCES cards(id),
+  grading_company  TEXT NOT NULL,
+  grade            TEXT NOT NULL,
+  max_price        REAL,
+  enabled          INTEGER NOT NULL DEFAULT 1,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  last_checked_at  TEXT,
+  UNIQUE(card_id, grading_company, grade)
+);
+
+-- Every marketplace listing that ever matched a watch. Rows are kept after a
+-- listing ends so history stays visible. One listing = one row: dedupe is
+-- (source, listing_id), plus canonical_key for the same item surfacing via
+-- two sources (e.g. an eBay listing mirrored by an aggregator) — first watch
+-- to match keeps the row, later sightings just refresh price/last_seen_at.
+CREATE TABLE IF NOT EXISTS listings (
+  id             INTEGER PRIMARY KEY,
+  watch_id       INTEGER NOT NULL REFERENCES watches(id),
+  source         TEXT NOT NULL,
+  listing_id     TEXT NOT NULL,
+  canonical_key  TEXT,
+  title          TEXT NOT NULL,
+  url            TEXT,
+  price          REAL,
+  currency       TEXT DEFAULT 'USD',
+  price_usd      REAL,
+  listing_type   TEXT CHECK (listing_type IN ('auction','fixed')),
+  ends_at        TEXT,
+  image_url      TEXT,
+  seller         TEXT,
+  match_score    REAL,
+  match_debug    TEXT,
+  status         TEXT NOT NULL DEFAULT 'new'
+                 CHECK (status IN ('new','notified','dismissed','ended')),
+  reminder_sent  INTEGER NOT NULL DEFAULT 0,
+  misses         INTEGER NOT NULL DEFAULT 0,
+  found_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(source, listing_id)
+);
+
+-- Work queue for one check cycle, mirroring sync_runs/sync_items: one item
+-- per (watch, source) so an interrupted check resumes with only its pending
+-- items.
+CREATE TABLE IF NOT EXISTS watch_check_runs (
+  id              INTEGER PRIMARY KEY,
+  started_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at     TEXT,
+  trigger_kind    TEXT NOT NULL DEFAULT 'manual' CHECK (trigger_kind IN ('manual','scheduled')),
+  status          TEXT NOT NULL DEFAULT 'running'
+                  CHECK (status IN ('running','completed','failed','cancelled')),
+  items_total     INTEGER NOT NULL DEFAULT 0,
+  items_processed INTEGER NOT NULL DEFAULT 0,
+  items_failed    INTEGER NOT NULL DEFAULT 0,
+  new_listings    INTEGER NOT NULL DEFAULT 0,
+  error           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS watch_check_items (
+  id        INTEGER PRIMARY KEY,
+  run_id    INTEGER NOT NULL REFERENCES watch_check_runs(id),
+  watch_id  INTEGER NOT NULL REFERENCES watches(id),
+  source    TEXT NOT NULL,
+  status    TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','done','failed')),
+  attempts  INTEGER NOT NULL DEFAULT 0,
+  error     TEXT,
+  UNIQUE(run_id, watch_id, source)
+);
+
+-- Per-source bookkeeping: kill switch, 429 backoff, cached auth (e.g. the
+-- eBay OAuth token, so restarts don't re-mint).
+CREATE TABLE IF NOT EXISTS source_state (
+  source           TEXT PRIMARY KEY,
+  enabled          INTEGER NOT NULL DEFAULT 1,
+  last_request_at  TEXT,
+  backoff_until    TEXT,
+  auth_json        TEXT
+);
+
+-- Tiny key/value cache (currently: daily FX rates for USD normalization).
+CREATE TABLE IF NOT EXISTS kv_cache (
+  key         TEXT PRIMARY KEY,
+  value       TEXT,
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_cards_player ON cards(player_id);
 CREATE INDEX IF NOT EXISTS idx_grade_prices_card ON grade_prices(card_id);
 -- Serves the disparity query's driving scan (grading_company = X AND grade IN …).
 CREATE INDEX IF NOT EXISTS idx_grade_prices_company_grade ON grade_prices(grading_company, grade, card_id);
 CREATE INDEX IF NOT EXISTS idx_sync_items_run_status ON sync_items(sync_run_id, status);
+CREATE INDEX IF NOT EXISTS idx_listings_watch_status ON listings(watch_id, status);
+CREATE INDEX IF NOT EXISTS idx_listings_status ON listings(status, found_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_listings_canonical ON listings(canonical_key) WHERE canonical_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_watch_check_items_run ON watch_check_items(run_id, status);
