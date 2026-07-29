@@ -66,4 +66,6 @@ CREATE TABLE IF NOT EXISTS sync_items (
 
 CREATE INDEX IF NOT EXISTS idx_cards_player ON cards(player_id);
 CREATE INDEX IF NOT EXISTS idx_grade_prices_card ON grade_prices(card_id);
+-- Serves the disparity query's driving scan (grading_company = X AND grade IN …).
+CREATE INDEX IF NOT EXISTS idx_grade_prices_company_grade ON grade_prices(grading_company, grade, card_id);
 CREATE INDEX IF NOT EXISTS idx_sync_items_run_status ON sync_items(sync_run_id, status);

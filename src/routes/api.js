@@ -1,8 +1,14 @@
 import { Router } from 'express';
-import { COMPARE_GRADES } from '../config.js';
+import { BASELINE_COMPANY, COMPARE_GRADERS, COMPARE_GRADES } from '../config.js';
 
 export function makeApiRouter(db, q, syncManager) {
   const router = Router();
+
+  // The UI builds its Grade checkboxes and Grader dropdown from this, so
+  // adding a grade or grader is a config-only change.
+  router.get('/config', (_req, res) => {
+    res.json({ grades: COMPARE_GRADES, graders: COMPARE_GRADERS, baseline: BASELINE_COMPANY });
+  });
 
   router.post('/sync', (req, res) => {
     const { playerIds = null, resume = false } = req.body ?? {};
@@ -32,20 +38,26 @@ export function makeApiRouter(db, q, syncManager) {
   router.get('/results', (req, res) => {
     const basis = req.query.basis === 'last_sale' ? 'last_sale' : 'cl_value';
     const sort = req.query.sort === 'abs' ? 'abs' : 'pct';
-    const direction = ['sgc_cheaper', 'psa_cheaper'].includes(req.query.direction)
+    const direction = ['grader_cheaper', 'psa_cheaper'].includes(req.query.direction)
       ? req.query.direction
       : 'all';
     const minPrice = Math.max(0, parseFloat(req.query.minPrice) || 0);
     const minDiff = Math.max(0, parseFloat(req.query.minDiff) || 0);
-    // grades: comma-separated subset of COMPARE_GRADES. Absent -> default to 10 only.
+    const minPctDiff = Math.max(0, parseFloat(req.query.minPctDiff) || 0);
+    // grades / graders: comma-separated subsets of COMPARE_GRADES /
+    // COMPARE_GRADERS; values are validated inside resultsQuery (single owner
+    // of that rule). Absent -> the query's defaults (grade 10, first grader).
     const grades = req.query.grades === undefined
       ? undefined
-      : String(req.query.grades).split(',').map((s) => s.trim()).filter((g) => COMPARE_GRADES.includes(g));
+      : String(req.query.grades).split(',').map((s) => s.trim()).filter(Boolean);
+    const graders = req.query.graders === undefined
+      ? undefined
+      : String(req.query.graders).split(',').map((s) => s.trim()).filter(Boolean);
     const playerId = parseInt(req.query.playerId, 10) || null;
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 5000);
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
 
-    res.json(q.resultsQuery({ basis, sort, direction, minPrice, minDiff, grades, playerId, limit, offset }));
+    res.json(q.resultsQuery({ basis, sort, direction, minPrice, minDiff, minPctDiff, grades, graders, playerId, limit, offset }));
   });
 
   return router;

@@ -1,6 +1,6 @@
 // All prepared statements live here. Parsers and routes never build SQL.
 
-import { COMPARE_GRADES, TARGETS } from '../config.js';
+import { BASELINE_COMPANY, COMPARE_GRADERS, COMPARE_GRADES } from '../config.js';
 
 export function makeQueries(db) {
   const upsertCard = db.prepare(`
@@ -43,84 +43,94 @@ export function makeQueries(db) {
   const listGradePresence = db.prepare(`SELECT DISTINCT grading_company, grade FROM grade_prices`);
 
   // --- disparity ---------------------------------------------------------
-  // basis: 'cl_value' | 'last_sale' ; both grades must have a non-null value
+  // basis: 'cl_value' | 'last_sale' ; both sides must have a non-null value
   // on the chosen basis to be comparable.
-  // grades: which numeric grades to compare like-for-like (SGC <g> vs PSA <g>).
+  // graders: which companies' grades are compared against the PSA baseline.
+  //   Omitted -> [COMPARE_GRADERS[0]]. Several at once are fine — each
+  //   produces its own rows, tagged by a `grader` column.
+  // grades: which numeric grades to compare like-for-like (<grader> g vs PSA g).
   //   Omitted -> ['10'] (the original behavior). A 9 is never compared to a 10:
-  //   each grade produces its own paired rows, UNION'd, with a `grade` column so
-  //   a card can appear once per grade when both are requested.
-  function resultsQuery({ basis, sort, direction, minPrice, minDiff, grades, playerId, limit, offset }) {
+  //   each (card, grade, grader) with both sides is its own row.
+  function resultsQuery({ basis, sort, direction, minPrice, minDiff, minPctDiff, grades, graders, playerId, limit, offset }) {
     const basisCol = basis === 'last_sale' ? 'last_sale_price' : 'cl_value';
     const sortCol = sort === 'abs' ? 'abs_diff' : 'pct_diff';
 
-    // Only the grades we actually crawl are valid; anything else is dropped.
+    // Only configured graders/grades are valid; anything else is dropped.
+    const graderList = (graders === undefined ? [COMPARE_GRADERS[0]] : graders)
+      .filter((c) => COMPARE_GRADERS.includes(c));
     const gradeList = (grades === undefined ? ['10'] : grades).filter((g) => COMPARE_GRADES.includes(g));
-    if (gradeList.length === 0) {
+    if (gradeList.length === 0 || graderList.length === 0) {
       return { rows: [], total: 0, excludedMissingGrade: 0, missingGrades: [] };
     }
 
-    // A requested grade with no synced rows on BOTH sides (a DB from before
-    // that grade was crawled, or a sync cancelled between the SGC and PSA
-    // passes) can never produce a pair — report it so the UI can say
-    // "run Sync" instead of showing a silently empty table.
+    // A requested (grader, grade) combo with no synced rows on BOTH sides (a
+    // DB from before that grade/grader was crawled, or a sync cancelled
+    // between passes) can never produce a pair — report it (as "SGC 7" style
+    // labels) so the UI can say "run Sync" instead of showing a silently
+    // empty table.
     const present = new Set(listGradePresence.all().map((r) => `${r.grading_company}|${r.grade}`));
-    const missingGrades = gradeList.filter(
-      (g) => !present.has(`${TARGETS.sgc.company}|${g}`) || !present.has(`${TARGETS.psa.company}|${g}`)
+    const missingGrades = graderList.flatMap((c) =>
+      gradeList
+        .filter((g) => !present.has(`${c}|${g}`) || !present.has(`${BASELINE_COMPANY}|${g}`))
+        .map((g) => `${c} ${g}`)
     );
 
     let where = '1=1';
-    if (direction === 'sgc_cheaper') where = 'd.abs_diff > 0';
+    if (direction === 'grader_cheaper') where = 'd.abs_diff > 0';
     else if (direction === 'psa_cheaper') where = 'd.abs_diff < 0';
 
-    const params = { minPrice: minPrice ?? 0, minDiff: minDiff ?? 0, limit, offset };
+    const params = { minPrice: minPrice ?? 0, minDiff: minDiff ?? 0, minPctDiff: minPctDiff ?? 0, limit, offset };
     let playerFilter = '';
     if (playerId) {
       playerFilter = 'AND c.player_id = @playerId';
       params.playerId = playerId;
     }
 
-    // One paired SELECT per requested grade, UNION ALL'd. `grade` is a literal
-    // column (the values are validated above, so interpolation is safe).
-    const pairSelect = (g) => `
+    // Single pass driven from the graders' own price rows: (card, grade,
+    // grader) pairs with both sides valid come straight out of one self-join,
+    // instead of the old per-grade UNION of LEFT JOINs over the whole cards
+    // table. Company names and grades are interpolated as literals — all are
+    // validated against the fixed config allowlists above, so that's safe.
+    const gradeIn = gradeList.map((g) => `'${g}'`).join(', ');
+    const graderIn = graderList.map((c) => `'${c}'`).join(', ');
+
+    const cte = `
+      WITH comparable AS (
         SELECT
           c.id AS card_id, c.name, c.set_name, c.year, c.card_number, c.parallel, c.cl_url,
           p.name AS player_name,
-          '${g}' AS grade,
-          sgc.${basisCol} AS sgc_price,
+          grd.grade AS grade,
+          grd.grading_company AS grader,
+          grd.${basisCol} AS grader_price,
           psa.${basisCol} AS psa_price,
-          sgc.last_sale_date AS sgc_last_sale_date,
+          grd.last_sale_date AS grader_last_sale_date,
           psa.last_sale_date AS psa_last_sale_date,
-          sgc.last_sale_price AS sgc_last_sale_price,
+          grd.last_sale_price AS grader_last_sale_price,
           psa.last_sale_price AS psa_last_sale_price,
-          sgc.cl_value AS sgc_cl_value,
+          grd.cl_value AS grader_cl_value,
           psa.cl_value AS psa_cl_value,
-          sgc.population AS sgc_pop,
+          grd.population AS grader_pop,
           psa.population AS psa_pop,
-          sgc.num_sales AS sgc_sales,
-          psa.num_sales AS psa_sales
-        FROM cards c
+          grd.num_sales AS grader_sales,
+          psa.num_sales AS psa_sales,
+          (psa.${basisCol} - grd.${basisCol}) AS abs_diff,
+          ROUND((psa.${basisCol} - grd.${basisCol}) * 100.0 / grd.${basisCol}, 1) AS pct_diff
+        FROM grade_prices grd
+        JOIN grade_prices psa ON psa.card_id = grd.card_id
+          AND psa.grade = grd.grade
+          AND psa.grading_company = '${BASELINE_COMPANY}'
+        JOIN cards c ON c.id = grd.card_id
         LEFT JOIN players p ON p.id = c.player_id
-        LEFT JOIN grade_prices sgc ON sgc.card_id = c.id
-          AND sgc.grading_company = '${TARGETS.sgc.company}' AND sgc.grade = '${g}'
-        LEFT JOIN grade_prices psa ON psa.card_id = c.id
-          AND psa.grading_company = '${TARGETS.psa.company}' AND psa.grade = '${g}'
-        WHERE 1=1 ${playerFilter}`;
-
-    const cte = `
-      WITH pairs AS (
-${gradeList.map(pairSelect).join('\n        UNION ALL\n')}
-      ),
-      comparable AS (
-        SELECT *,
-          (psa_price - sgc_price) AS abs_diff,
-          ROUND((psa_price - sgc_price) * 100.0 / sgc_price, 1) AS pct_diff
-        FROM pairs
-        WHERE sgc_price IS NOT NULL AND sgc_price > 0
-          AND psa_price IS NOT NULL AND psa_price > 0
+        WHERE grd.grading_company IN (${graderIn})
+          AND grd.grade IN (${gradeIn})
+          AND grd.${basisCol} IS NOT NULL AND grd.${basisCol} > 0
+          AND psa.${basisCol} IS NOT NULL AND psa.${basisCol} > 0
+          ${playerFilter}
       ),
       filtered AS (
         SELECT * FROM comparable d
-        WHERE d.sgc_price >= @minPrice AND ABS(d.abs_diff) >= @minDiff AND ${where}
+        WHERE d.grader_price >= @minPrice AND ABS(d.abs_diff) >= @minDiff
+          AND ABS(d.pct_diff) >= @minPctDiff AND ${where}
       )
     `;
 
@@ -131,18 +141,29 @@ ${gradeList.map(pairSelect).join('\n        UNION ALL\n')}
       LIMIT @limit OFFSET @offset
     `).all(params);
 
+    // excludedMissingGrade counts one-sided data on this basis: grader-side
+    // rows that couldn't pair with a valid PSA row, plus PSA rows that paired
+    // with none of the selected graders. Cards with data only under some
+    // OTHER grader deliberately don't count: they're irrelevant here.
     const totals = db.prepare(`
       ${cte}
       SELECT
         (SELECT COUNT(*) FROM filtered) AS total,
-        (SELECT COUNT(*) FROM pairs) AS all_cards,
-        (SELECT COUNT(*) FROM comparable) AS comparable_cards
+        (SELECT COUNT(*) FROM comparable) AS comparable_cards,
+        (SELECT COUNT(*) FROM (SELECT DISTINCT card_id, grade FROM comparable)) AS paired_card_grades,
+        (SELECT COUNT(*) FROM grade_prices gp JOIN cards c ON c.id = gp.card_id
+          WHERE gp.grading_company IN (${graderIn}) AND gp.grade IN (${gradeIn})
+            AND gp.${basisCol} IS NOT NULL ${playerFilter}) AS grader_rows,
+        (SELECT COUNT(*) FROM grade_prices gp JOIN cards c ON c.id = gp.card_id
+          WHERE gp.grading_company = '${BASELINE_COMPANY}' AND gp.grade IN (${gradeIn})
+            AND gp.${basisCol} IS NOT NULL ${playerFilter}) AS psa_rows
     `).get(params);
 
     return {
       rows,
       total: totals.total,
-      excludedMissingGrade: totals.all_cards - totals.comparable_cards,
+      excludedMissingGrade:
+        totals.grader_rows + totals.psa_rows - totals.comparable_cards - totals.paired_card_grades,
       missingGrades,
     };
   }

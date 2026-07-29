@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GradeGap — SGC vs PSA</title>
+  <title>GradeGap — grader vs PSA</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>" />
 </head>
@@ -11,7 +11,7 @@
   <header>
     <div class="title">
       <h1>GradeGap</h1>
-      <span class="subtitle">SGC vs PSA price disparity — grades 10 &amp; 9</span>
+      <span class="subtitle">SGC / BGS vs PSA price disparity, like grade vs like grade</span>
     </div>
     <div class="sync">
       <span id="sync-info" class="sync-info"></span>
@@ -38,33 +38,34 @@
     </div>
     <div class="control">
       <label>Grade</label>
-      <div class="checks" id="grade-filter">
-        <label><input type="checkbox" data-grade="10" checked /> 10</label>
-        <label><input type="checkbox" data-grade="9" checked /> 9</label>
-      </div>
+      <!-- Checkboxes are built by app.js from /api/config (COMPARE_GRADES). -->
+      <div class="checks" id="grade-filter"></div>
     </div>
     <div class="control">
       <label>Liquidity</label>
       <div class="checks" id="color-filter">
         <label><input type="checkbox" data-color="green" checked /> <i class="dot dot-green"></i> Green</label>
-        <label><input type="checkbox" data-color="yellow" checked /> <i class="dot dot-yellow"></i> Yellow</label>
-        <label><input type="checkbox" data-color="red" checked /> <i class="dot dot-red"></i> Red</label>
-        <label><input type="checkbox" data-color="gray" checked /> <i class="dot dot-gray"></i> Other</label>
+        <label><input type="checkbox" data-color="yellow" /> <i class="dot dot-yellow"></i> Yellow</label>
+        <label><input type="checkbox" data-color="red" /> <i class="dot dot-red"></i> Red</label>
+        <label><input type="checkbox" data-color="gray" /> <i class="dot dot-gray"></i> Other</label>
       </div>
     </div>
     <div class="control">
-      <label for="grader">Grader</label>
-      <select id="grader" title="Grader compared against PSA (PSA is always the higher-priced side)">
-        <option value="SGC">SGC</option>
-      </select>
+      <label>Grader</label>
+      <!-- Checkboxes are built by app.js from /api/config (COMPARE_GRADERS). -->
+      <div class="checks" id="grader-filter"></div>
     </div>
     <div class="control">
-      <label for="min-price">Min SGC 10 price ($)</label>
-      <input type="number" id="min-price" min="0" step="50" value="0" />
+      <label for="min-price">Min price ($)</label>
+      <input type="number" id="min-price" min="0" step="50" value="0" title="Only show pairs whose grader-side price is at least this much" />
     </div>
     <div class="control">
       <label for="min-diff">Min $ Diff ($)</label>
-      <input type="number" id="min-diff" min="0" step="50" value="0" title="Only show cards whose SGC↔PSA gap is at least this many dollars" />
+      <input type="number" id="min-diff" min="0" step="50" value="0" title="Only show cards whose grader↔PSA gap is at least this many dollars" />
+    </div>
+    <div class="control">
+      <label for="min-pct-diff">Min % Diff</label>
+      <input type="number" id="min-pct-diff" min="0" step="5" value="15" title="Only show cards whose grader↔PSA gap is at least this percentage" />
     </div>
     <div class="control">
       <label for="player">Player</label>
@@ -78,7 +79,7 @@
       <div class="legend">
         <span><i class="dot dot-green"></i> both &lt;3mo</span>
         <span><i class="dot dot-yellow"></i> both &gt;12mo</span>
-        <span><i class="dot dot-red"></i> SGC &gt;3mo &amp; PSA &lt;3mo</span>
+        <span><i class="dot dot-red"></i> grader &gt;3mo &amp; PSA &lt;3mo</span>
         <span><i class="dot dot-gray"></i> other</span>
       </div>
     </div>
@@ -88,12 +89,13 @@
           <th class="dot-col sortable" data-col="color" data-type="color" title="Liquidity — how recently each side last sold — click to sort"><span class="hcell"><span class="arrow"></span></span></th>
           <th class="sortable" data-col="name" data-type="text"><span class="hcell">Card<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="grade" data-type="num"><span class="hcell">Grade<span class="arrow"></span></span></th>
-          <th class="num sortable" data-col="sgc_price" data-type="num"><span class="hcell">SGC<span class="arrow"></span></span></th>
+          <th class="sortable" data-col="grader" data-type="text"><span class="hcell">Grader<span class="arrow"></span></span></th>
+          <th class="num sortable" data-col="grader_price" data-type="num"><span class="hcell">Price<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="psa_price" data-type="num"><span class="hcell">PSA<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="abs_diff" data-type="num"><span class="hcell">$ Diff<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="pct_diff" data-type="num"><span class="hcell">% Diff<span class="arrow"></span></span></th>
-          <th class="sortable" data-col="sgc_last_sale_date" data-type="date"><span class="hcell">SGC last sale<span class="arrow"></span></span></th>
-          <th class="num sortable" data-col="sgc_sales" data-type="num"><span class="hcell">SGC Sales No<span class="arrow"></span></span></th>
+          <th class="sortable" data-col="grader_last_sale_date" data-type="date"><span class="hcell">Last sale<span class="arrow"></span></span></th>
+          <th class="num sortable" data-col="grader_sales" data-type="num"><span class="hcell">Sales No<span class="arrow"></span></span></th>
           <th class="sortable" data-col="psa_last_sale_date" data-type="date"><span class="hcell">PSA last sale<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="psa_sales" data-type="num"><span class="hcell">PSA Sales No<span class="arrow"></span></span></th>
         </tr>

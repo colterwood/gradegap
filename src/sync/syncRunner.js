@@ -111,6 +111,10 @@ export function createSyncManager(db, q) {
       const stale = q.latestStaleRun.get();
       if (!stale) throw Object.assign(new Error('no interrupted sync to resume'), { code: 400 });
       runId = stale.id;
+      // Top up the work queue: conditions added to CRAWL_CONDITIONS since the
+      // run was created (new grades/graders) become pending items; existing
+      // items keep their status via insertSyncItem's ON CONFLICT DO NOTHING.
+      for (const condition of CRAWL_CONDITIONS) q.insertSyncItem.run(runId, condition, condition);
     } else {
       runId = Number(q.createSyncRun.run().lastInsertRowid);
       for (const condition of CRAWL_CONDITIONS) q.insertSyncItem.run(runId, condition, condition);

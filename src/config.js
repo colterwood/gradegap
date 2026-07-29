@@ -11,25 +11,28 @@ function intEnv(name, fallback) {
   return Number.isFinite(v) ? v : fallback;
 }
 
-// The two conditions being compared. `condition` is the exact filter value the
-// Ladder's search API expects (e.g. "condition:SGC 10"). SGC's numeric 10 comes
-// in two flavors — "10 Gem Mint" and the rarer "10 Pristine"; the app's
-// "SGC 10 - Gem Mint" selection maps to condition "SGC 10", and the adapter
-// normalizes any Pristine rows to grade '10 PRI', so grade '10' always = Gem Mint.
-export const TARGETS = {
-  sgc: { company: 'SGC', grade: '10', condition: 'SGC 10', label: 'SGC 10 Gem Mint' },
-  psa: { company: 'PSA', grade: '10', condition: 'PSA 10', label: 'PSA 10 Gem Mint' },
-};
+// PSA is always the baseline (compare-to) side of every comparison.
+export const BASELINE_COMPANY = 'PSA';
 
-// The numeric grades we compare like-for-like: SGC 10 vs PSA 10, SGC 9 vs PSA 9.
-// A 9 is NEVER compared against a 10 — each grade is its own paired comparison.
-export const COMPARE_GRADES = ['10', '9'];
+// Graders that can be compared against PSA — the UI's Grader dropdown. Note on
+// grade labels: condition "SGC 10" is Gem Mint (the adapter normalizes SGC's
+// rarer "10 Pristine" to grade '10 PRI' so it can never leak into the 10
+// comparison); condition "BGS 10" is BGS Pristine, its standard numeric 10.
+export const COMPARE_GRADERS = ['SGC', 'BGS'];
 
-// Conditions the sync crawls, one grade-filtered pass each. SGC before PSA per
-// grade so its (smaller) universe and card-page links seed shared cards first.
+// The numeric grades we compare like-for-like: <grader> N vs PSA N. A 9 is
+// NEVER compared against a 10 — each grade is its own paired comparison.
+// (BGS half grades like 9.5 exist on the Ladder but are deliberately not
+// crawled: they have no like-for-like PSA counterpart in this scheme.)
+export const COMPARE_GRADES = ['10', '9', '8', '7'];
+
+// Conditions the sync crawls, one grade-filtered pass each: every compare
+// grader plus the PSA baseline, per grade. Compare graders before PSA per
+// grade so their (smaller) universes and card-page links seed shared cards
+// first.
 export const CRAWL_CONDITIONS = COMPARE_GRADES.flatMap((g) => [
-  `${TARGETS.sgc.company} ${g}`,
-  `${TARGETS.psa.company} ${g}`,
+  ...COMPARE_GRADERS.map((c) => `${c} ${g}`),
+  `${BASELINE_COMPANY} ${g}`,
 ]);
 
 export const config = {

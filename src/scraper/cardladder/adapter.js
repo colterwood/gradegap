@@ -120,6 +120,11 @@ const SALE_DATE_KEYS = ['lastSaleDate', 'last_sale_date', 'date', 'saleDate', 's
 // value. Only SGC gets this treatment: for BGS "Pristine" IS the standard 10
 // label, and PSA 10 is always Gem Mint.
 const PRISTINE_RE = /\bpri(?:stine)?\b/i;
+// BGS's numeric 10 likewise has a rarer, far pricier tier: "Black Label"
+// (all subgrades 10). Canonicalize it to '10 BL' so such a row can never
+// overwrite the standard BGS 10 value. (For BGS, plain "Pristine" IS the
+// ordinary 10 label, so only Black Label needs this treatment.)
+const BLACK_LABEL_RE = /\bblack\s*label\b/i;
 
 function normalizeGrade(company, gradeRaw, contextText) {
   let text = String(gradeRaw).trim();
@@ -128,6 +133,9 @@ function normalizeGrade(company, gradeRaw, contextText) {
   let grade = num[0];
   if (company === 'SGC' && grade === '10' && (PRISTINE_RE.test(text) || PRISTINE_RE.test(contextText))) {
     grade = '10 PRI';
+  }
+  if (company === 'BGS' && grade === '10' && (BLACK_LABEL_RE.test(text) || BLACK_LABEL_RE.test(contextText))) {
+    grade = '10 BL';
   }
   return grade;
 }

@@ -3,12 +3,18 @@ const state = {
   direction: 'all',
   minPrice: 0,
   minDiff: 0,
+  minPctDiff: 15, // matches the input's default value in index.html
   playerId: '',
-  sortColumn: 'pct_diff', // default: biggest % gaps first
+  sortColumn: 'abs_diff', // default: biggest dollar gaps first
   sortDir: 'desc',
-  colors: { green: true, yellow: true, red: true, gray: true },
-  // Which like-for-like comparisons to run: SGC 10 vs PSA 10, SGC 9 vs PSA 9.
-  grades: { '10': true, '9': true },
+  // Liquidity defaults to green only — both sides sold recently.
+  colors: { green: true, yellow: false, red: false, gray: false },
+  // Which graders are compared against the PSA baseline (several at once are
+  // fine — each gets its own rows), and which like-for-like grade comparisons
+  // run (<grader> g vs PSA g). Both checkbox sets are populated from
+  // /api/config on init so the server config is the single source of truth.
+  graders: {},
+  grades: {},
 };
 
 // The current, unsorted result set (fetched once per server-side filter change).
@@ -45,23 +51,23 @@ function fmtAge(m) {
   return `${(m / 12).toFixed(1)}yr ago`;
 }
 
-// Color rules, evaluated against TODAY (SGC = the non-PSA grader):
-//   green = both SGC and PSA last sold <3mo
-//   yellow = both SGC and PSA last sold >12mo
-//   red = SGC last sold >3mo AND PSA last sold <3mo
+// Color rules, evaluated against TODAY (grader = the non-PSA side):
+//   green = both grader and PSA last sold <3mo
+//   yellow = both grader and PSA last sold >12mo
+//   red = grader last sold >3mo AND PSA last sold <3mo
 //   gray = anything the three rules don't cover (e.g. PSA itself >3mo)
 function recencyDot(row) {
-  const sgcM = monthsSince(row.sgc_last_sale_date);
+  const grdM = monthsSince(row.grader_last_sale_date);
   const psaM = monthsSince(row.psa_last_sale_date);
 
   let color;
-  if (sgcM < 3 && psaM < 3) color = 'green';
-  else if (sgcM > 12 && psaM > 12) color = 'yellow';
-  else if (sgcM > 3 && psaM < 3) color = 'red';
+  if (grdM < 3 && psaM < 3) color = 'green';
+  else if (grdM > 12 && psaM > 12) color = 'yellow';
+  else if (grdM > 3 && psaM < 3) color = 'red';
   else color = 'gray';
 
   const g = row.grade ?? '';
-  const title = `SGC ${g} last sold ${fmtAge(sgcM)} · PSA ${g} last sold ${fmtAge(psaM)}`;
+  const title = `${row.grader} ${g} last sold ${fmtAge(grdM)} · PSA ${g} last sold ${fmtAge(psaM)}`;
   return { color, title };
 }
 
@@ -77,12 +83,18 @@ async function api(path, opts) {
 
 // --- results ---------------------------------------------------------------
 
+// Guards against overlapping fetches resolving out of order (the 2s sync poll
+// plus a filter change): only the newest call may commit its response.
+let loadSeq = 0;
+
 // Fetch the full comparable set for the current server-side filters (basis,
 // direction, min price, player). Sorting and color filtering happen client-side.
 async function loadResults() {
+  const seq = ++loadSeq;
   const grades = Object.entries(state.grades).filter(([, on]) => on).map(([g]) => g);
-  // No grade selected -> nothing to compare; clear the table without a fetch.
-  if (grades.length === 0) {
+  const graders = Object.entries(state.graders).filter(([, on]) => on).map(([c]) => c);
+  // No grade or no grader selected -> nothing to compare; clear without a fetch.
+  if (grades.length === 0 || graders.length === 0) {
     currentRows = [];
     lastMeta = { total: 0, excluded: 0, missing: [] };
     renderResults();
@@ -94,12 +106,15 @@ async function loadResults() {
     direction: state.direction,
     minPrice: state.minPrice,
     minDiff: state.minDiff,
+    minPctDiff: state.minPctDiff,
     grades: grades.join(','),
+    graders: graders.join(','),
     limit: 5000,
   });
   if (state.playerId) params.set('playerId', state.playerId);
 
   const data = await api(`/api/results?${params}`);
+  if (seq !== loadSeq) return; // a newer request took over while we awaited
   currentRows = data.rows.map((row) => ({ ...row, _dot: recencyDot(row) }));
   lastMeta = { total: data.total, excluded: data.excludedMissingGrade, missing: data.missingGrades ?? [] };
   renderResults();
@@ -112,7 +127,7 @@ function sortValue(row, column) {
     case 'color': return COLOR_RANK[row._dot.color];
     case 'grade': return Number(row.grade);
     case 'name': return (row.name || '').toLowerCase();
-    case 'sgc_last_sale_date':
+    case 'grader_last_sale_date':
     case 'psa_last_sale_date': return row[column] || ''; // ISO strings sort lexically; '' (never) sorts first asc / handled below
     default: return row[column]; // numeric columns
   }
@@ -124,7 +139,7 @@ function renderResults() {
 
   const col = state.sortColumn;
   const dir = state.sortDir === 'asc' ? 1 : -1;
-  const isDate = col === 'sgc_last_sale_date' || col === 'psa_last_sale_date';
+  const isDate = col === 'grader_last_sale_date' || col === 'psa_last_sale_date';
   rows.sort((a, b) => {
     let av = sortValue(a, col);
     let bv = sortValue(b, col);
@@ -150,12 +165,13 @@ function renderResults() {
       <td class="dot-cell"><span class="dot dot-${row._dot.color}" title="${row._dot.title}"></span></td>
       <td>${link}</td>
       <td class="num grade-cell">${row.grade ?? '—'}</td>
-      <td class="num">${fmtMoney(row.sgc_price)}</td>
+      <td class="grade-cell">${row.grader ?? '—'}</td>
+      <td class="num">${fmtMoney(row.grader_price)}</td>
       <td class="num">${fmtMoney(row.psa_price)}</td>
       <td class="num ${diffClass}">${row.abs_diff >= 0 ? '+' : ''}${fmtMoney(row.abs_diff)}</td>
       <td class="num ${diffClass}">${row.pct_diff >= 0 ? '+' : ''}${row.pct_diff}%</td>
-      <td class="date">${fmtDate(row.sgc_last_sale_date)}</td>
-      <td class="num">${row.sgc_sales ?? '—'}</td>
+      <td class="date">${fmtDate(row.grader_last_sale_date)}</td>
+      <td class="num">${row.grader_sales ?? '—'}</td>
       <td class="date">${fmtDate(row.psa_last_sale_date)}</td>
       <td class="num">${row.psa_sales ?? '—'}</td>
     `;
@@ -168,10 +184,12 @@ function renderResults() {
   if (rows.length === 0) {
     if (!Object.values(state.grades).some(Boolean)) {
       emptyEl.textContent = 'Select a grade to compare.';
+    } else if (!Object.values(state.graders).some(Boolean)) {
+      emptyEl.textContent = 'Select at least one grader to compare against PSA.';
     } else if (currentRows.length > 0) {
       emptyEl.textContent = 'All rows are hidden by the current Liquidity filter.';
     } else if (lastMeta.missing.length > 0) {
-      emptyEl.innerHTML = `No grade ${lastMeta.missing.join(' or ')} data synced yet — hit <strong>Sync</strong> to pull it.`;
+      emptyEl.innerHTML = `No ${lastMeta.missing.join(' or ')} vs PSA data synced yet — hit <strong>Sync</strong> to pull it.`;
     } else {
       emptyEl.innerHTML = 'No matching cards — hit <strong>Sync</strong> to pull data from Card Ladder, or loosen the filters.';
     }
@@ -183,7 +201,7 @@ function renderResults() {
   if (rows.length !== lastMeta.total) bits.push(`${rows.length} of ${lastMeta.total} cards`);
   else bits.push(`${lastMeta.total} card${lastMeta.total === 1 ? '' : 's'} with both grades`);
   if (lastMeta.excluded > 0) bits.push(`${lastMeta.excluded} skipped (missing a grade on this basis)`);
-  for (const g of lastMeta.missing) bits.push(`no grade ${g} data synced yet — run Sync to pull it`);
+  for (const m of lastMeta.missing) bits.push(`no ${m} vs PSA data synced yet — run Sync to pull it`);
   $('summary').textContent = bits.join(' · ');
 }
 
@@ -273,6 +291,36 @@ async function triggerSync(resume) {
   }
 }
 
+// --- config-driven controls ------------------------------------------------
+
+// Fill a .checks container with one labeled checkbox per value, mirroring the
+// selections into stateMap (all start checked).
+function buildChecks(containerId, dataKey, values, stateMap) {
+  const box = $(containerId);
+  box.innerHTML = '';
+  for (const v of values) {
+    stateMap[v] = true;
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset[dataKey] = v;
+    cb.checked = true;
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(` ${v}`));
+    box.appendChild(label);
+  }
+}
+
+// Build the Grade and Grader checkboxes from the server's config so adding a
+// grade or grader is a config.js-only change.
+async function loadConfig() {
+  const cfg = await api('/api/config');
+  buildChecks('grade-filter', 'grade', cfg.grades, state.grades);
+  buildChecks('grader-filter', 'grader', cfg.graders, state.graders);
+  document.querySelector('.subtitle').textContent =
+    `${cfg.graders.join(' / ')} vs ${cfg.baseline} price disparity, like grade vs like grade`;
+}
+
 // --- players + wiring ------------------------------------------------------
 
 async function loadPlayers() {
@@ -330,9 +378,12 @@ $('grade-filter').addEventListener('change', (e) => {
   loadResults().catch((err) => setError(err.message));
 });
 
-// Grader selector — only SGC for now; PSA is always the compare-to (higher)
-// side. Wired so adding more graders later is a one-line change.
-$('grader').addEventListener('change', () => {
+// Grader checkboxes change which companies are compared against the PSA
+// baseline; several can be shown at once (each row carries its grader).
+$('grader-filter').addEventListener('change', (e) => {
+  const cb = e.target.closest('input[type="checkbox"]');
+  if (!cb) return;
+  state.graders[cb.dataset.grader] = cb.checked;
   loadResults().catch((err) => setError(err.message));
 });
 
@@ -354,6 +405,15 @@ $('min-diff').addEventListener('input', (e) => {
   }, 300);
 });
 
+let minPctDiffDebounce = null;
+$('min-pct-diff').addEventListener('input', (e) => {
+  clearTimeout(minPctDiffDebounce);
+  minPctDiffDebounce = setTimeout(() => {
+    state.minPctDiff = parseFloat(e.target.value) || 0;
+    loadResults().catch((err) => setError(err.message));
+  }, 300);
+});
+
 $('player').addEventListener('change', (e) => {
   state.playerId = e.target.value;
   loadResults().catch((err) => setError(err.message));
@@ -365,6 +425,7 @@ $('cancel-btn').addEventListener('click', () => api('/api/sync/cancel', { method
 
 (async function init() {
   try {
+    await loadConfig();
     await loadPlayers();
     const s = await refreshStatus();
     if (s.running) startPolling();
