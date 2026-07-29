@@ -1,17 +1,18 @@
-// Pristine Auction (pristineauction.com) — high-volume daily auctions.
-// No anonymous JSON API is known and the site sits behind Cloudflare bot
-// checks, so this adapter drives the shared visible browser (same persistent
-// profile as the Card Ladder sync — clearance cookies stick). Live testing
-// 404'd the guessed /search path, so instead of guessing URLs it uses the
-// site's OWN search box on the homepage and parses whatever results page
-// the site navigates to: schema.org JSON-LD blocks first, DOM tiles as a
-// fallback. Verify locally with
+// Pristine is TWO venues (per the user's local verification):
+//   1. pristineauction.com — the auction side; lot search lives at
+//      /auction/search/ (browser-driven — Cloudflare + client rendering).
+//   2. pristinemarketplace.com — a separate fixed-price marketplace site;
+//      probed as a Shopify storefront first (clean JSON, no scraping), with
+//      the failure logged for a debug round-trip if it turns out not to be.
+// One adapter returns both sides' listings. Verify locally with
 // `npm run test-source pristine "jordan psa 10" --debug`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
 import { saveDebug, debugLog } from './util.js';
+import { searchShopifyShop } from './shopify.js';
 
 const SITE = 'https://www.pristineauction.com';
+const MARKETPLACE = { domain: 'www.pristinemarketplace.com', currency: 'USD' };
 
 const SEARCH_INPUTS = [
   'input[type="search"]',
@@ -68,99 +69,98 @@ export function createPristineSource() {
     },
 
     async search({ text }) {
-      // Learn the search URL from the site's own form markup — the input
-      // doesn't need to be VISIBLE (live testing: it's hidden behind a
-      // toggle); its enclosing <form action> + input name are still there.
-      await page.goto(`${SITE}/`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-      await page.waitForTimeout(2000); // homepage settle / CF check
+      // JSON-LD first, /auction/item/ tiles second — whatever page we're on.
+      const parseCurrentPage = async () => {
+        const blocks = await page.$$eval('script[type="application/ld+json"]', (nodes) =>
+          nodes.map((n) => {
+            try { return JSON.parse(n.textContent); } catch { return null; }
+          }).filter(Boolean)
+        ).catch(() => []);
+        const fromLd = parsePristineJsonLd(blocks.flat());
+        if (fromLd.length > 0) return fromLd;
+        return page.$$eval('a[href*="/auction/item/"]', (links) => {
+          const seen = new Map();
+          for (const a of links) {
+            const href = a.href;
+            const id = href.match(/\/auction\/item\/(\d+)/)?.[1];
+            const title = (a.getAttribute('title') || a.textContent || '').trim().replace(/\s+/g, ' ');
+            if (!id || seen.has(id) || title.length < 10) continue;
+            const tile = a.closest('div,li,article') ?? a;
+            const priceText = tile.textContent.match(/\$[\d,]+(?:\.\d{2})?/)?.[0] ?? null;
+            seen.set(id, {
+              listingId: id,
+              canonicalKey: `pristine:${id}`,
+              title,
+              url: href,
+              price: priceText ? parseFloat(priceText.replace(/[$,]/g, '')) : null,
+              currency: 'USD',
+              listingType: 'auction',
+              endsAt: null,
+              imageUrl: tile.querySelector('img')?.src ?? null,
+              seller: null,
+            });
+          }
+          return [...seen.values()];
+        }).catch(() => []);
+      };
 
-      const form = await page.evaluate((selectors) => {
-        for (const sel of selectors) {
-          const input = document.querySelector(sel);
-          if (!input) continue;
-          const f = input.closest('form');
-          return {
-            sel,
-            name: input.getAttribute('name') || 'q',
-            action: f?.getAttribute('action') ?? null,
-            method: (f?.getAttribute('method') ?? 'get').toLowerCase(),
-          };
-        }
-        return null;
-      }, SEARCH_INPUTS).catch(() => null);
-
-      // Candidate result URLs, best-informed first. /auction/index/... is
-      // the site's own routing scheme (seen on its category pages).
-      const candidates = [];
-      if (form?.action && form.method === 'get') {
-        candidates.push(`${new URL(form.action, SITE).href}?${encodeURIComponent(form.name)}=${encodeURIComponent(text)}`);
-        debugLog('pristine', `form found via ${form.sel}: action=${form.action} name=${form.name}`);
-      } else if (form) {
-        debugLog('pristine', `form found via ${form.sel} but method=${form.method} action=${form.action}`);
-      } else {
-        debugLog('pristine', 'no search form in homepage DOM — trying known URL patterns');
-      }
+      // --- auction side: /auction/search/ is the real results page --------
       const q = encodeURIComponent(text);
-      candidates.push(
-        `${SITE}/auction/index/search/?q=${q}`,
-        `${SITE}/auction/index/search/?search=${q}`,
-        `${SITE}/auction/index/search/?keyword=${q}`,
-        `${SITE}/auction/index/search/keyword/${q}`
-      );
-
-      let landed = false;
+      const candidates = [
+        `${SITE}/auction/search/?q=${q}`,
+        `${SITE}/auction/search/?search=${q}`,
+        `${SITE}/auction/search/?keyword=${q}`,
+      ];
+      let auctionResults = [];
       for (const url of candidates) {
         const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => null);
         const status = res?.status() ?? 0;
-        debugLog('pristine', `GET ${url} → ${status}`);
-        if (status >= 200 && status < 400) {
-          landed = true;
+        if (status < 200 || status >= 400) {
+          debugLog('pristine', `GET ${url} → ${status}`);
+          continue;
+        }
+        await page.waitForTimeout(2500); // results render
+        auctionResults = await parseCurrentPage();
+        debugLog('pristine', `GET ${url} → ${status}, parsed ${auctionResults.length}`);
+        if (auctionResults.length > 0) break;
+      }
+
+      // Param name unknown? Use the search page's own input as the oracle.
+      if (auctionResults.length === 0) {
+        await page.goto(`${SITE}/auction/search/`, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => null);
+        await page.waitForTimeout(1500);
+        for (const sel of SEARCH_INPUTS) {
+          const box = page.locator(sel).first();
+          if (!(await box.isVisible().catch(() => false))) continue;
+          debugLog('pristine', `filling search input ${sel} on /auction/search/`);
+          await box.fill(text).catch(() => {});
+          await Promise.all([
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => null),
+            box.press('Enter').catch(() => {}),
+          ]);
+          await page.waitForTimeout(2500);
+          auctionResults = await parseCurrentPage();
+          debugLog('pristine', `after form search: ${page.url()} — parsed ${auctionResults.length}`);
           break;
         }
       }
-      if (!landed) {
-        saveDebug('pristine', 'homepage', await page.content().catch(() => ''), 'html');
+      if (auctionResults.length === 0) {
+        saveDebug('pristine', 'auction-results', await page.content().catch(() => ''), 'html');
         const shot = await page.screenshot().catch(() => null);
         if (shot) saveDebug('pristine', 'screenshot', shot, 'png');
-        throw new Error('Pristine: every candidate search URL failed — run with --debug and send the captures');
       }
-      await page.waitForTimeout(2500); // results render
 
-      const blocks = await page.$$eval('script[type="application/ld+json"]', (nodes) =>
-        nodes.map((n) => {
-          try { return JSON.parse(n.textContent); } catch { return null; }
-        }).filter(Boolean)
-      ).catch(() => []);
-      const fromLd = parsePristineJsonLd(blocks.flat());
-      debugLog('pristine', `landed on ${page.url()} — ${blocks.length} JSON-LD blocks, ${fromLd.length} products`);
-      if (fromLd.length > 0) return fromLd;
-      saveDebug('pristine', 'results', await page.content().catch(() => ''), 'html');
+      // --- marketplace side: pristinemarketplace.com (Shopify?) -----------
+      let marketResults = [];
+      try {
+        marketResults = await searchShopifyShop(MARKETPLACE, text);
+        debugLog('pristine', `marketplace (shopify) returned ${marketResults.length}`);
+        for (const l of marketResults) l.canonicalKey = `pristine-mkt:${l.listingId}`;
+      } catch (err) {
+        debugLog('pristine', `marketplace side failed: ${err.message}`);
+      }
 
-      // Fallback: auction item tiles link to /auction/item/<id>-<slug>.
-      return page.$$eval('a[href*="/auction/item/"]', (links) => {
-        const seen = new Map();
-        for (const a of links) {
-          const href = a.href;
-          const id = href.match(/\/auction\/item\/(\d+)/)?.[1];
-          const title = (a.getAttribute('title') || a.textContent || '').trim().replace(/\s+/g, ' ');
-          if (!id || seen.has(id) || title.length < 10) continue;
-          const tile = a.closest('div,li,article') ?? a;
-          const priceText = tile.textContent.match(/\$[\d,]+(?:\.\d{2})?/)?.[0] ?? null;
-          seen.set(id, {
-            listingId: id,
-            canonicalKey: `pristine:${id}`,
-            title,
-            url: href,
-            price: priceText ? parseFloat(priceText.replace(/[$,]/g, '')) : null,
-            currency: 'USD',
-            listingType: 'auction',
-            endsAt: null,
-            imageUrl: tile.querySelector('img')?.src ?? null,
-            seller: null,
-          });
-        }
-        return [...seen.values()];
-      }).catch(() => []);
+      return [...auctionResults, ...marketResults];
     },
 
     async close() {

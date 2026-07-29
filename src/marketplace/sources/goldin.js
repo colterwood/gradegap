@@ -23,7 +23,7 @@ export function extractGoldinConfig(bundleJs) {
 }
 
 // Pure, fixture-testable: a lots response body → normalized raw listings.
-export function parseGoldinLots(body, cloudFront) {
+export function parseGoldinLots(body, cloudFront, listingType = 'auction') {
   const lots = body?.searchalgolia?.lots ?? body?.lots ?? [];
   const out = [];
   for (const lot of lots) {
@@ -39,9 +39,9 @@ export function parseGoldinLots(body, cloudFront) {
       canonicalKey: `goldin:${id}`,
       title: lot.title,
       url: slug ? `${SITE}/item/${slug}` : `${SITE}/buy?search=${encodeURIComponent(lot.title)}`,
-      price: toNumber(lot.current_price ?? lot.min_bid_price),
+      price: toNumber(lot.current_price ?? lot.min_bid_price ?? lot.price ?? lot.buy_now_price),
       currency: 'USD',
-      listingType: 'auction',
+      listingType,
       endsAt: lot.end_time ?? lot.ends_at ?? lot.auction_end_time ?? null,
       imageUrl,
       seller: null,
@@ -81,34 +81,46 @@ export function createGoldinSource() {
     },
 
     async search({ text }) {
-      sniffed = [];
-      await page.goto(`${SITE}/buy?search=${encodeURIComponent(text)}`, {
-        waitUntil: 'domcontentloaded',
-        timeout: 45_000,
-      });
-      // Give the SPA time to fire its search request(s).
-      for (let i = 0; i < 10 && sniffed.length === 0; i++) await page.waitForTimeout(1000);
-      await page.waitForTimeout(1500); // let a late richer response land too
+      // Both Goldin venues: /buy (auctions) and /fixed-price (marketplace).
+      const sniffVenue = async (path, listingType, patienceSec) => {
+        sniffed = [];
+        const ok = await page
+          .goto(`${SITE}${path}${encodeURIComponent(text)}`, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+          .then((r) => (r?.status() ?? 0) < 400)
+          .catch(() => false);
+        if (!ok) {
+          debugLog('goldin', `${path} navigation failed`);
+          return [];
+        }
+        // Give the SPA time to fire its search request(s).
+        for (let i = 0; i < patienceSec && sniffed.length === 0; i++) await page.waitForTimeout(1000);
+        await page.waitForTimeout(1500); // let a late richer response land too
+        debugLog('goldin', `${path} sniffed ${sniffed.length} lots-shaped responses`);
+        const out = [];
+        const seen = new Set();
+        for (const { json } of sniffed) {
+          for (const l of parseGoldinLots(json, null, listingType)) {
+            if (!seen.has(l.listingId) && seen.add(l.listingId)) out.push(l);
+          }
+        }
+        if (sniffed.length > 0) {
+          saveDebug('goldin', `lots-${listingType}`, JSON.stringify(sniffed[0].json).slice(0, 20000), 'json');
+        }
+        return out;
+      };
 
-      debugLog('goldin', `sniffed ${sniffed.length} lots-shaped responses`);
-      if (sniffed.length === 0) {
+      const auctions = await sniffVenue('/buy?search=', 'auction', 10);
+      const fixed = await sniffVenue('/fixed-price?search=', 'fixed', 6);
+
+      if (auctions.length === 0 && fixed.length === 0) {
         saveDebug('goldin', 'page', await page.content().catch(() => ''), 'html');
         const shot = await page.screenshot({ fullPage: false }).catch(() => null);
         if (shot) saveDebug('goldin', 'screenshot', shot, 'png');
         debugLog('goldin', `page title: ${await page.title().catch(() => '?')}`);
-        return [];
       }
-      saveDebug('goldin', 'lots-response', JSON.stringify(sniffed[0].json).slice(0, 20000), 'json');
-
-      // Merge every sniffed payload (the SPA may page or refine).
+      // A listing sniffed on both venues keeps its first (auction) row.
       const seen = new Set();
-      const out = [];
-      for (const { json } of sniffed) {
-        for (const l of parseGoldinLots(json, null)) {
-          if (!seen.has(l.listingId) && seen.add(l.listingId)) out.push(l);
-        }
-      }
-      return out;
+      return [...auctions, ...fixed].filter((l) => !seen.has(l.listingId) && seen.add(l.listingId));
     },
 
     async close() {
