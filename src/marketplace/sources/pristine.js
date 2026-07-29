@@ -68,30 +68,62 @@ export function createPristineSource() {
     },
 
     async search({ text }) {
-      // Use the site's own search box — URL guessing 404'd in live testing.
+      // Learn the search URL from the site's own form markup — the input
+      // doesn't need to be VISIBLE (live testing: it's hidden behind a
+      // toggle); its enclosing <form action> + input name are still there.
       await page.goto(`${SITE}/`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
       await page.waitForTimeout(2000); // homepage settle / CF check
 
-      let box = null;
-      for (const sel of SEARCH_INPUTS) {
-        const candidate = page.locator(sel).first();
-        if (await candidate.isVisible().catch(() => false)) {
-          box = candidate;
-          debugLog('pristine', `using search input: ${sel}`);
+      const form = await page.evaluate((selectors) => {
+        for (const sel of selectors) {
+          const input = document.querySelector(sel);
+          if (!input) continue;
+          const f = input.closest('form');
+          return {
+            sel,
+            name: input.getAttribute('name') || 'q',
+            action: f?.getAttribute('action') ?? null,
+            method: (f?.getAttribute('method') ?? 'get').toLowerCase(),
+          };
+        }
+        return null;
+      }, SEARCH_INPUTS).catch(() => null);
+
+      // Candidate result URLs, best-informed first. /auction/index/... is
+      // the site's own routing scheme (seen on its category pages).
+      const candidates = [];
+      if (form?.action && form.method === 'get') {
+        candidates.push(`${new URL(form.action, SITE).href}?${encodeURIComponent(form.name)}=${encodeURIComponent(text)}`);
+        debugLog('pristine', `form found via ${form.sel}: action=${form.action} name=${form.name}`);
+      } else if (form) {
+        debugLog('pristine', `form found via ${form.sel} but method=${form.method} action=${form.action}`);
+      } else {
+        debugLog('pristine', 'no search form in homepage DOM — trying known URL patterns');
+      }
+      const q = encodeURIComponent(text);
+      candidates.push(
+        `${SITE}/auction/index/search/?q=${q}`,
+        `${SITE}/auction/index/search/?search=${q}`,
+        `${SITE}/auction/index/search/?keyword=${q}`,
+        `${SITE}/auction/index/search/keyword/${q}`
+      );
+
+      let landed = false;
+      for (const url of candidates) {
+        const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => null);
+        const status = res?.status() ?? 0;
+        debugLog('pristine', `GET ${url} → ${status}`);
+        if (status >= 200 && status < 400) {
+          landed = true;
           break;
         }
       }
-      if (!box) {
+      if (!landed) {
         saveDebug('pristine', 'homepage', await page.content().catch(() => ''), 'html');
         const shot = await page.screenshot().catch(() => null);
         if (shot) saveDebug('pristine', 'screenshot', shot, 'png');
-        throw new Error(`Pristine: no search input found on homepage (title: ${await page.title().catch(() => '?')})`);
+        throw new Error('Pristine: every candidate search URL failed — run with --debug and send the captures');
       }
-      await box.fill(text);
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => null),
-        box.press('Enter'),
-      ]);
       await page.waitForTimeout(2500); // results render
 
       const blocks = await page.$$eval('script[type="application/ld+json"]', (nodes) =>
