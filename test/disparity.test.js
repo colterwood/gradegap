@@ -101,6 +101,61 @@ test('SGC 10 Pristine rows never enter the Gem Mint comparison', () => {
   assert.equal(c1.pct_diff, 400);
 });
 
+test('default results carry a grade column of 10', () => {
+  const { q } = seedDb();
+  const r = q.resultsQuery(base);
+  assert.ok(r.rows.every((x) => x.grade === '10'));
+});
+
+// Seed a distinct SGC 9 / PSA 9 pair on top of the grade-10 fixture.
+function seedWithNines() {
+  const { db, q } = seedDb();
+  const cardId = q.getCardByClId.get('c1').id; // 1986 Fleer #57
+  q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '9', clValue: 400, lastSalePrice: 380, lastSaleDate: '2026-07-01', population: null, numSales: null, syncRunId: null });
+  q.upsertGradePrice.run({ cardId, company: 'PSA', grade: '9', clValue: 900, lastSalePrice: 880, lastSaleDate: '2026-07-02', population: null, numSales: null, syncRunId: null });
+  // c2 gets an SGC 9 but NO PSA 9 — must never pair against c2's PSA 10.
+  const c2 = q.getCardByClId.get('c2').id;
+  q.upsertGradePrice.run({ cardId: c2, company: 'SGC', grade: '9', clValue: 100, lastSalePrice: 95, lastSaleDate: '2026-07-01', population: null, numSales: null, syncRunId: null });
+  return { db, q };
+}
+
+test('grade 9 is compared only against grade 9, never crossed with 10', () => {
+  const { q } = seedWithNines();
+  const r = q.resultsQuery({ ...base, grades: ['9'] });
+  // Only c1 has a full SGC9/PSA9 pair. c2 has SGC9 but no PSA9 -> excluded.
+  assert.deepEqual(r.rows.map((x) => x.name), ['1986 Fleer #57']);
+  assert.equal(r.rows[0].grade, '9');
+  assert.equal(r.rows[0].sgc_price, 400);
+  assert.equal(r.rows[0].psa_price, 900); // the PSA 9, not the PSA 10 (5000)
+});
+
+test('both grades checked = union of the two comparisons (a card can appear per grade)', () => {
+  const { q } = seedWithNines();
+  const r = q.resultsQuery({ ...base, grades: ['10', '9'] });
+  const c1Rows = r.rows.filter((x) => x.name === '1986 Fleer #57');
+  assert.equal(c1Rows.length, 2);
+  assert.deepEqual(c1Rows.map((x) => x.grade).sort(), ['10', '9']);
+  // grade 10 keeps its own prices; grade 9 keeps its own.
+  assert.equal(c1Rows.find((x) => x.grade === '10').psa_price, 5000);
+  assert.equal(c1Rows.find((x) => x.grade === '9').psa_price, 900);
+});
+
+test('no grade selected yields an empty result set', () => {
+  const { q } = seedWithNines();
+  const r = q.resultsQuery({ ...base, grades: [] });
+  assert.deepEqual(r.rows, []);
+  assert.equal(r.total, 0);
+});
+
+test('minDiff filters on the absolute dollar gap', () => {
+  const { q } = seedDb();
+  // abs diffs (cl_value): c1 4000, c2 100, c3 -150, c4 40.
+  // minDiff 200 keeps only |gap| >= 200: c1 (4000) — c3 is 150, dropped.
+  const r = q.resultsQuery({ ...base, minDiff: 200 });
+  assert.deepEqual(r.rows.map((x) => x.name), ['1986 Fleer #57']);
+  assert.equal(r.total, 1);
+});
+
 test('upsert replaces prices instead of duplicating', () => {
   const { q } = seedDb();
   const cardId = q.getCardByClId.get('c1').id;

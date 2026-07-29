@@ -53,15 +53,17 @@ test('SGC 10 Pristine rows are excluded from the Gem Mint comparison', async () 
   // Pristine value is 120000; if it leaked in, sgc_price would not be 24500
   assert.equal(jordan.sgc_price, 24500);
 
-  // the crawl only requests condition "SGC 10" (Gem Mint), so the Pristine
-  // row — a distinct condition — is never even fetched: exclusion happens at
-  // the source, not just in the parser. Only the Gem Mint value is stored.
+  // the crawl requests conditions "SGC 10" (Gem Mint) and "SGC 9" — both real
+  // grades — but never "SGC 10 Pristine", a distinct condition. So the Pristine
+  // row is never even fetched: exclusion happens at the source, not just in the
+  // parser. Only the Gem Mint 10 and the 9 are stored (no '10 PRI').
   const card = q.getCardByClId.get('spec:299576');
   assert.ok(card, 'card stored under its psaSpecId key');
   const grades = db
     .prepare(`SELECT grade, cl_value FROM grade_prices WHERE card_id = ? AND grading_company = 'SGC' ORDER BY grade`)
     .all(card.id);
-  assert.deepEqual(grades, [{ grade: '10', cl_value: 24500 }]);
+  // ORDER BY grade sorts lexically: '10' before '9'.
+  assert.deepEqual(grades, [{ grade: '10', cl_value: 24500 }, { grade: '9', cl_value: 6800 }]);
 });
 
 test('last_sale basis drops cards missing a market value on either side', async () => {

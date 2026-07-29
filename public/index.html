@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GradeGap — SGC 10 vs PSA 10</title>
+  <title>GradeGap — SGC vs PSA</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>" />
 </head>
@@ -11,7 +11,7 @@
   <header>
     <div class="title">
       <h1>GradeGap</h1>
-      <span class="subtitle">SGC 10 Gem Mint vs PSA 10 price disparity</span>
+      <span class="subtitle">SGC vs PSA price disparity — grades 10 &amp; 9</span>
     </div>
     <div class="sync">
       <span id="sync-info" class="sync-info"></span>
@@ -37,6 +37,13 @@
       </div>
     </div>
     <div class="control">
+      <label>Grade</label>
+      <div class="checks" id="grade-filter">
+        <label><input type="checkbox" data-grade="10" checked /> 10 <span class="hint">SGC 10 vs PSA 10</span></label>
+        <label><input type="checkbox" data-grade="9" checked /> 9 <span class="hint">SGC 9 vs PSA 9</span></label>
+      </div>
+    </div>
+    <div class="control">
       <label>Recency</label>
       <div class="checks" id="color-filter">
         <label><input type="checkbox" data-color="green" checked /> <i class="dot dot-green"></i> Green</label>
@@ -54,6 +61,10 @@
     <div class="control">
       <label for="min-price">Min SGC 10 price ($)</label>
       <input type="number" id="min-price" min="0" step="50" value="0" />
+    </div>
+    <div class="control">
+      <label for="min-diff">Min $ Diff ($)</label>
+      <input type="number" id="min-diff" min="0" step="50" value="0" title="Only show cards whose SGC↔PSA gap is at least this many dollars" />
     </div>
     <div class="control">
       <label for="player">Player</label>
@@ -76,8 +87,9 @@
         <tr>
           <th class="dot-col sortable" data-col="color" data-type="color" title="Recency of the last sale — click to sort"><span class="hcell"><span class="arrow"></span></span></th>
           <th class="sortable" data-col="name" data-type="text"><span class="hcell">Card<span class="arrow"></span></span></th>
-          <th class="num sortable" data-col="sgc_price" data-type="num"><span class="hcell">SGC 10 GM<span class="arrow"></span></span></th>
-          <th class="num sortable" data-col="psa_price" data-type="num"><span class="hcell">PSA 10<span class="arrow"></span></span></th>
+          <th class="num sortable" data-col="grade" data-type="num"><span class="hcell">Grade<span class="arrow"></span></span></th>
+          <th class="num sortable" data-col="sgc_price" data-type="num"><span class="hcell">SGC<span class="arrow"></span></span></th>
+          <th class="num sortable" data-col="psa_price" data-type="num"><span class="hcell">PSA<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="abs_diff" data-type="num"><span class="hcell">$ Diff<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="pct_diff" data-type="num"><span class="hcell">% Diff<span class="arrow"></span></span></th>
           <th class="sortable" data-col="sgc_last_sale_date" data-type="date"><span class="hcell">SGC last sale<span class="arrow"></span></span></th>

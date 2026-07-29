@@ -41,26 +41,38 @@ export function makeQueries(db) {
   // --- disparity ---------------------------------------------------------
   // basis: 'cl_value' | 'last_sale' ; both grades must have a non-null value
   // on the chosen basis to be comparable.
-  function resultsQuery({ basis, sort, direction, minPrice, playerId, limit, offset }) {
+  // grades: which numeric grades to compare like-for-like (SGC <g> vs PSA <g>).
+  //   Omitted -> ['10'] (the original behavior). A 9 is never compared to a 10:
+  //   each grade produces its own paired rows, UNION'd, with a `grade` column so
+  //   a card can appear once per grade when both are requested.
+  function resultsQuery({ basis, sort, direction, minPrice, minDiff, grades, playerId, limit, offset }) {
     const basisCol = basis === 'last_sale' ? 'last_sale_price' : 'cl_value';
     const sortCol = sort === 'abs' ? 'abs_diff' : 'pct_diff';
+
+    // Only the grades we actually crawl are valid; anything else is dropped.
+    const gradeList = (grades === undefined ? ['10'] : grades).filter((g) => g === '10' || g === '9');
+    if (gradeList.length === 0) {
+      return { rows: [], total: 0, excludedMissingGrade: 0 };
+    }
 
     let where = '1=1';
     if (direction === 'sgc_cheaper') where = 'd.abs_diff > 0';
     else if (direction === 'psa_cheaper') where = 'd.abs_diff < 0';
 
-    const params = { minPrice: minPrice ?? 0, limit, offset };
+    const params = { minPrice: minPrice ?? 0, minDiff: minDiff ?? 0, limit, offset };
     let playerFilter = '';
     if (playerId) {
       playerFilter = 'AND c.player_id = @playerId';
       params.playerId = playerId;
     }
 
-    const cte = `
-      WITH pairs AS (
+    // One paired SELECT per requested grade, UNION ALL'd. `grade` is a literal
+    // column (the values are validated above, so interpolation is safe).
+    const pairSelect = (g) => `
         SELECT
           c.id AS card_id, c.name, c.set_name, c.year, c.card_number, c.parallel, c.cl_url,
           p.name AS player_name,
+          '${g}' AS grade,
           sgc.${basisCol} AS sgc_price,
           psa.${basisCol} AS psa_price,
           sgc.last_sale_date AS sgc_last_sale_date,
@@ -76,10 +88,14 @@ export function makeQueries(db) {
         FROM cards c
         LEFT JOIN players p ON p.id = c.player_id
         LEFT JOIN grade_prices sgc ON sgc.card_id = c.id
-          AND sgc.grading_company = '${TARGETS.sgc.company}' AND sgc.grade = '${TARGETS.sgc.grade}'
+          AND sgc.grading_company = '${TARGETS.sgc.company}' AND sgc.grade = '${g}'
         LEFT JOIN grade_prices psa ON psa.card_id = c.id
-          AND psa.grading_company = '${TARGETS.psa.company}' AND psa.grade = '${TARGETS.psa.grade}'
-        WHERE 1=1 ${playerFilter}
+          AND psa.grading_company = '${TARGETS.psa.company}' AND psa.grade = '${g}'
+        WHERE 1=1 ${playerFilter}`;
+
+    const cte = `
+      WITH pairs AS (
+${gradeList.map(pairSelect).join('\n        UNION ALL\n')}
       ),
       comparable AS (
         SELECT *,
@@ -91,7 +107,7 @@ export function makeQueries(db) {
       ),
       filtered AS (
         SELECT * FROM comparable d
-        WHERE d.sgc_price >= @minPrice AND ${where}
+        WHERE d.sgc_price >= @minPrice AND ABS(d.abs_diff) >= @minDiff AND ${where}
       )
     `;
 

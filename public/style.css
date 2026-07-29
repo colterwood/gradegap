@@ -142,10 +142,14 @@ th.sortable:hover { background: #f1f3f6; }
 th.sorted { color: var(--accent); }
 th .arrow { font-size: 11px; }
 
-/* color filter checkboxes */
+/* color / grade filter checkboxes */
 .checks { display: flex; gap: 12px; align-items: center; height: 34px; }
 .checks label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--ink); cursor: pointer; text-transform: none; letter-spacing: 0; }
 .checks input { cursor: pointer; }
+.checks .hint { color: var(--muted); font-size: 11px; }
+
+/* grade column */
+td.grade-cell { color: var(--muted); font-weight: 600; }
 
 .summary-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .legend { display: flex; gap: 16px; color: var(--muted); font-size: 12px; }

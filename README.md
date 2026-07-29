@@ -1,9 +1,12 @@
 # GradeGap
 
 A personal, local-only web app that finds sports cards with the biggest price
-disparity between their **SGC 10 Gem Mint** and **PSA 10** grades, using data
-from your own [Card Ladder](https://app.cardladder.com) account. (SGC's rarer
-"10 Pristine" is deliberately excluded from the comparison.)
+disparity between their **SGC** and **PSA** grades, using data from your own
+[Card Ladder](https://app.cardladder.com) account. It compares like grades:
+**SGC 10 vs PSA 10** and **SGC 9 vs PSA 9** — a 9 is never compared against a
+10. Pick either grade or both with the **Grade** checkboxes; with both on, a
+card can appear once per grade. (SGC's rarer "10 Pristine" is deliberately
+excluded from the 10 comparison.)
 
 Everything runs on your computer. Your Card Ladder login happens in a real
 browser window on your machine; your password is never stored (unless you opt
@@ -13,7 +16,8 @@ in via `.env`) and never leaves your computer.
 
 - Click **Sync** in the web UI → a Chromium window (driven by Playwright,
   logged in as you) opens the Ladder and pulls its grade-filtered list API in
-  bulk: one pass filtered to **SGC 10 Gem Mint**, one to **PSA 10**. Each page
+  bulk: one grade-filtered pass each for **SGC 10 Gem Mint**, **PSA 10**,
+  **SGC 9**, and **PSA 9**. Each page
   of that API returns many cards *with their values already on the row*, so
   there are **no per-card page visits** — a full catalog sync is a few hundred
   JSON requests (minutes), not one page load per card.
@@ -22,8 +26,10 @@ in via `.env`) and never leaves your computer.
   the results page is instant and works offline.
 - The table ranks cards by disparity — toggleable between **% difference**
   and **$ difference**, between **CL Value** and **Last Sale** price basis,
-  and filterable by direction (SGC cheaper / PSA cheaper), minimum price, and
-  player. Every row links to the card's page on Card Ladder.
+  and filterable by grade (10 / 9), recency, minimum SGC price, minimum dollar
+  gap (**Min $ Diff**), and player. A **Grade** column shows which comparison a
+  row came from, and **SGC / PSA Sales No** columns show each side's Number of
+  Sales. Every row links to the card's page on Card Ladder.
 
 ## Setup (first time)
 
@@ -77,7 +83,7 @@ npm start
 npm start          # → http://localhost:4000, click Sync when you want fresh data
 ```
 
-- A sync pages through the whole SGC 10 Gem Mint and PSA 10 lists (a few
+- A sync pages through the whole SGC 10, PSA 10, SGC 9, and PSA 9 lists (a few
   hundred requests total, a few minutes). The progress bar shows where it is,
   **Cancel** stops it cleanly, and an interrupted sync can be **Resumed**.
 - If Card Ladder logs you out mid-sync, the run stops with a message — just

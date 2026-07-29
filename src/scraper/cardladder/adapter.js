@@ -169,6 +169,29 @@ const toNumber = (v) => {
   return null;
 };
 
+// The Ladder's "Number of Sales" count. Its exact key on a search hit isn't
+// pinned down, so try the likely spellings (and fall back to the length of an
+// embedded sales array) rather than assuming a single field name.
+const SALES_COUNT_KEYS = [
+  'numSales', 'numberOfSales', 'salesCount', 'saleCount', 'totalSales',
+  'salesTotal', 'numSalesTotal', 'numberSales', 'saleQty', 'salesQty',
+  'transactionCount', 'numTransactions', 'tradeCount', 'salesVolume',
+];
+
+function extractSalesCount(hit) {
+  for (const k of SALES_COUNT_KEYS) {
+    const v = hit[k];
+    if (v === undefined || v === null || v === '') continue;
+    const n = toNumber(v);
+    if (n !== null) return n;
+  }
+  // Some shapes carry the individual sales as an array; its length is the count.
+  for (const k of ['sales', 'saleHistory', 'salesHistory', 'transactions']) {
+    if (Array.isArray(hit[k])) return hit[k].length;
+  }
+  return null;
+}
+
 export function parsePrices({ json }) {
   const byKey = new Map();
   for (const { record } of iterateRecords(json)) {
@@ -267,7 +290,7 @@ export function parseLadderHit(hit) {
       lastSalePrice,
       lastSaleDate: hit.lastSoldDate ?? null,
       population: hit.pop != null ? toNumber(hit.pop) : null,
-      numSales: hit.numSales != null ? toNumber(hit.numSales) : null,
+      numSales: extractSalesCount(hit),
     },
   };
 }

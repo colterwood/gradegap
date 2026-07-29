@@ -21,9 +21,16 @@ export const TARGETS = {
   psa: { company: 'PSA', grade: '10', condition: 'PSA 10', label: 'PSA 10 Gem Mint' },
 };
 
-// Conditions the sync crawls, in order. SGC first so its (smaller) universe
-// and its card-page links win the COALESCE on shared cards.
-export const CRAWL_CONDITIONS = [TARGETS.sgc.condition, TARGETS.psa.condition];
+// The numeric grades we compare like-for-like: SGC 10 vs PSA 10, SGC 9 vs PSA 9.
+// A 9 is NEVER compared against a 10 — each grade is its own paired comparison.
+export const COMPARE_GRADES = ['10', '9'];
+
+// Conditions the sync crawls, one grade-filtered pass each. SGC before PSA per
+// grade so its (smaller) universe and card-page links seed shared cards first.
+export const CRAWL_CONDITIONS = COMPARE_GRADES.flatMap((g) => [
+  `${TARGETS.sgc.company} ${g}`,
+  `${TARGETS.psa.company} ${g}`,
+]);
 
 export const config = {
   port: intEnv('PORT', 4000),

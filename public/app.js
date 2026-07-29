@@ -2,10 +2,13 @@ const state = {
   basis: 'cl_value',
   direction: 'all',
   minPrice: 0,
+  minDiff: 0,
   playerId: '',
   sortColumn: 'pct_diff', // default: biggest % gaps first
   sortDir: 'desc',
   colors: { green: true, yellow: true, red: true, gray: true },
+  // Which like-for-like comparisons to run: SGC 10 vs PSA 10, SGC 9 vs PSA 9.
+  grades: { '10': true, '9': true },
 };
 
 // The current, unsorted result set (fetched once per server-side filter change).
@@ -52,7 +55,8 @@ function recencyDot(row) {
   else if (sgcM > 3 && psaM < 3) color = 'red';
   else color = 'gray';
 
-  const title = `SGC 10 GM last sold ${fmtAge(sgcM)} · PSA 10 last sold ${fmtAge(psaM)}`;
+  const g = row.grade ?? '';
+  const title = `SGC ${g} last sold ${fmtAge(sgcM)} · PSA ${g} last sold ${fmtAge(psaM)}`;
   return { color, title };
 }
 
@@ -71,10 +75,21 @@ async function api(path, opts) {
 // Fetch the full comparable set for the current server-side filters (basis,
 // direction, min price, player). Sorting and color filtering happen client-side.
 async function loadResults() {
+  const grades = Object.entries(state.grades).filter(([, on]) => on).map(([g]) => g);
+  // No grade selected -> nothing to compare; clear the table without a fetch.
+  if (grades.length === 0) {
+    currentRows = [];
+    lastMeta = { total: 0, excluded: 0 };
+    renderResults();
+    return;
+  }
+
   const params = new URLSearchParams({
     basis: state.basis,
     direction: state.direction,
     minPrice: state.minPrice,
+    minDiff: state.minDiff,
+    grades: grades.join(','),
     limit: 5000,
   });
   if (state.playerId) params.set('playerId', state.playerId);
@@ -90,6 +105,7 @@ let lastMeta = { total: 0, excluded: 0 };
 function sortValue(row, column) {
   switch (column) {
     case 'color': return COLOR_RANK[row._dot.color];
+    case 'grade': return Number(row.grade);
     case 'name': return (row.name || '').toLowerCase();
     case 'sgc_last_sale_date':
     case 'psa_last_sale_date': return row[column] || ''; // ISO strings sort lexically; '' (never) sorts first asc / handled below
@@ -128,6 +144,7 @@ function renderResults() {
     tr.innerHTML = `
       <td class="dot-cell"><span class="dot dot-${row._dot.color}" title="${row._dot.title}"></span></td>
       <td>${link}</td>
+      <td class="num grade-cell">${row.grade ?? '—'}</td>
       <td class="num">${fmtMoney(row.sgc_price)}</td>
       <td class="num">${fmtMoney(row.psa_price)}</td>
       <td class="num ${diffClass}">${row.abs_diff >= 0 ? '+' : ''}${fmtMoney(row.abs_diff)}</td>
@@ -278,12 +295,21 @@ for (const th of document.querySelectorAll('#results th.sortable')) {
   });
 }
 
-// Recency color filter checkboxes.
+// Recency color filter checkboxes (client-side only).
 $('color-filter').addEventListener('change', (e) => {
   const cb = e.target.closest('input[type="checkbox"]');
   if (!cb) return;
   state.colors[cb.dataset.color] = cb.checked;
   renderResults();
+});
+
+// Grade checkboxes change which comparisons the server runs (SGC 10 vs PSA 10,
+// SGC 9 vs PSA 9, or both), so they trigger a refetch.
+$('grade-filter').addEventListener('change', (e) => {
+  const cb = e.target.closest('input[type="checkbox"]');
+  if (!cb) return;
+  state.grades[cb.dataset.grade] = cb.checked;
+  loadResults().catch((err) => setError(err.message));
 });
 
 // Grader selector — only SGC for now; PSA is always the compare-to (higher)
@@ -297,6 +323,15 @@ $('min-price').addEventListener('input', (e) => {
   clearTimeout(minPriceDebounce);
   minPriceDebounce = setTimeout(() => {
     state.minPrice = parseFloat(e.target.value) || 0;
+    loadResults().catch((err) => setError(err.message));
+  }, 300);
+});
+
+let minDiffDebounce = null;
+$('min-diff').addEventListener('input', (e) => {
+  clearTimeout(minDiffDebounce);
+  minDiffDebounce = setTimeout(() => {
+    state.minDiff = parseFloat(e.target.value) || 0;
     loadResults().catch((err) => setError(err.message));
   }, 300);
 });
