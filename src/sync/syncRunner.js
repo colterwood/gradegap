@@ -63,8 +63,10 @@ export function createSyncManager(db, q) {
     return res.body;
   }
 
+  const fmt = (n) => Number(n).toLocaleString('en-US');
+
   async function crawlCondition(source, runId, condition, totals) {
-    currentLabel = `${condition} — page 1`;
+    currentLabel = `${condition} — starting…`;
     let stride = config.crawlLimit;
     let page = 0;
     let collected = 0;
@@ -92,7 +94,7 @@ export function createSyncManager(db, q) {
       }
 
       collected += body.hits.length;
-      currentLabel = `${condition} — ${Math.min(collected, totalHits)} / ${totalHits}`;
+      currentLabel = `${condition} — ${fmt(Math.min(collected, totalHits))} / ${fmt(totalHits)} cards`;
       if (body.hits.length === 0) break;
       page += 1;
       if (collected < totalHits) await sleep(config.pageDelayMs);

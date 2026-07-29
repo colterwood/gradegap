@@ -39,13 +39,14 @@ export function createCardLadderSource() {
       if (await looksLoggedOut(page)) {
         throw new Error('Not logged in to Card Ladder — run `npm run login` first.');
       }
-      // Let the Ladder's own search fire so we capture a Bearer token.
-      await page.waitForTimeout(2500);
+      // The Ladder's own search fires on load, carrying a Bearer token we grab.
+      // Wait for it (up to ~15s) before crawling.
+      for (let i = 0; i < 15 && !lastAuth; i++) await page.waitForTimeout(1000);
     },
 
     async refreshAuth() {
       await nav.goToLadder(page);
-      await page.waitForTimeout(2500);
+      for (let i = 0; i < 10 && !lastAuth; i++) await page.waitForTimeout(1000);
       if (await looksLoggedOut(page)) {
         throw new Error('Session expired — run `npm run login` again.');
       }
@@ -53,12 +54,16 @@ export function createCardLadderSource() {
 
     async fetchLadderPage({ condition, page: pageNum, limit }) {
       const url = buildLadderUrl({ condition, page: pageNum, limit });
-      return page.evaluate(
+
+      // Primary: fetch from inside the page, exactly like the app does — no
+      // `credentials` (the API allows origin '*', which browsers reject when
+      // credentials are sent), auth via the Bearer token only.
+      const inPage = await page.evaluate(
         async ({ url, auth }) => {
           try {
             const headers = { accept: 'application/json' };
             if (auth) headers.authorization = auth;
-            const r = await fetch(url, { headers, credentials: 'include' });
+            const r = await fetch(url, { headers });
             let body = null;
             try { body = await r.json(); } catch { /* non-JSON error page */ }
             return { status: r.status, body };
@@ -68,6 +73,24 @@ export function createCardLadderSource() {
         },
         { url, auth: lastAuth }
       );
+      if (inPage.status !== 0) return inPage;
+
+      // Fallback: a server-side request (no CORS at all), reusing the browser's
+      // cookies + the captured Bearer token.
+      try {
+        const resp = await context.request.get(url, {
+          headers: {
+            accept: 'application/json',
+            referer: 'https://app.cardladder.com/',
+            ...(lastAuth ? { authorization: lastAuth } : {}),
+          },
+        });
+        let body = null;
+        try { body = await resp.json(); } catch { /* non-JSON */ }
+        return { status: resp.status(), body };
+      } catch (e) {
+        return { status: 0, body: null, error: String(e) };
+      }
     },
 
     async close() {

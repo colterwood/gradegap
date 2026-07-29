@@ -81,9 +81,13 @@ async function refreshStatus() {
     const { cards_total, cards_processed } = s.run;
     const pct = cards_total ? Math.round((cards_processed / cards_total) * 100) : 0;
     $('progress-fill').style.width = `${pct}%`;
-    $('progress-text').textContent = cards_total
-      ? `${cards_processed} / ${cards_total} cards${s.currentCardName ? ` — ${s.currentCardName}` : ''}`
-      : 'Finding cards…';
+    // Primary line: the live per-grade counter (e.g. "SGC 10 — 142 / 533 cards").
+    // Secondary: overall processed across both grade passes.
+    const label = s.currentCardName || 'Starting…';
+    const overall = cards_total
+      ? `${cards_processed.toLocaleString()} / ${cards_total.toLocaleString()} total · ${pct}%`
+      : '';
+    $('progress-text').textContent = overall ? `${label}   ·   ${overall}` : label;
   }
 
   if (!s.running && s.run) {
@@ -97,10 +101,14 @@ async function refreshStatus() {
     }
   }
 
+  // Refresh the table live while a sync runs so cards visibly accumulate,
+  // and once more when it finishes.
+  if (s.running || (wasRunning && !s.running)) {
+    await loadResults().catch(() => {});
+  }
   if (wasRunning && !s.running) {
     clearInterval(pollTimer);
     pollTimer = null;
-    await loadResults();
   }
   wasRunning = s.running;
   return s;
