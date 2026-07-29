@@ -47,6 +47,36 @@ export function parseAuctionWorxBrowse(html, site = SITE) {
   return out;
 }
 
+// Fallback for skinned AuctionWorx sites whose result blocks don't match the
+// stock markup: work from the lot-detail anchors themselves. One listing per
+// distinct /Event/LotDetails/{id} (or /Listing/Details/{id}) link with real
+// anchor text; price = first $ amount within the following stretch of HTML.
+export function parseAuctionWorxLotLinks(html, site = SITE) {
+  const out = new Map();
+  const re = /<a[^>]+href=["']([^"']*\/(?:Event\/LotDetails|Listing\/Details)\/(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  for (const m of html.matchAll(re)) {
+    const [, href, id, inner] = m;
+    const title = stripTags(inner);
+    if (out.has(id) || title.length < 10) continue; // image/button anchors
+    const tail = html.slice(m.index, m.index + 1200);
+    const priceM = tail.match(/\$\s*([\d,]+(?:\.\d{2})?)/);
+    const endsM = tail.match(/data-action-time=["']([^"']+)["']/i);
+    out.set(id, {
+      listingId: id,
+      canonicalKey: `cia:${id}`,
+      title,
+      url: absUrl(href, site),
+      price: priceM ? toNumber(priceM[1]) : null,
+      currency: 'USD',
+      listingType: 'auction',
+      endsAt: endsM?.[1] ?? null,
+      imageUrl: null,
+      seller: 'Collector Investor Auctions',
+    });
+  }
+  return [...out.values()];
+}
+
 export function createCiaSource() {
   return {
     name: 'cia',
@@ -64,11 +94,17 @@ export function createCiaSource() {
         page: '0',
       });
       const html = await fetchHtml(`${SITE}/Browse?${params}`);
-      const out = parseAuctionWorxBrowse(html);
+      let out = parseAuctionWorxBrowse(html);
       if (out.length === 0) {
-        // Legit between monthly auctions, or a markup change — capture tells.
-        const markers = (html.match(/data-listingid/g) ?? []).length;
-        debugLog('cia', `0 parsed — ${markers} data-listingid markers in ${html.length}b of HTML`);
+        // Skinned markup? Fall back to the lot-detail anchors themselves.
+        out = parseAuctionWorxLotLinks(html);
+        debugLog('cia', `stock parse: 0, anchor fallback: ${out.length}`);
+      }
+      if (out.length === 0) {
+        // Legit between monthly auctions, or a markup change — the marker
+        // values + capture tell them apart.
+        const markers = [...html.matchAll(/data-listingid=["']([^"']*)["']/g)].map((m) => m[1] || '(empty)');
+        debugLog('cia', `0 parsed — data-listingid values: [${markers.slice(0, 10).join(', ')}] in ${html.length}b`);
         saveDebug('cia', 'browse', html, 'html');
       }
       return out;

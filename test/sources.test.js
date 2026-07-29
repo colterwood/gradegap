@@ -12,7 +12,8 @@ import { fileURLToPath } from 'node:url';
 import { parseComcFeed } from '../src/marketplace/sources/comc.js';
 import { parseFanaticsListing, parseFanaticsAlgoliaHit } from '../src/marketplace/sources/fanatics.js';
 import { parseHibidResults } from '../src/marketplace/sources/hibid.js';
-import { parseAuctionWorxBrowse } from '../src/marketplace/sources/cia.js';
+import { parseAuctionWorxBrowse, parseAuctionWorxLotLinks } from '../src/marketplace/sources/cia.js';
+import { parseHeritageEnds } from '../src/marketplace/sources/heritage.js';
 import { parseClassicCatalog } from '../src/marketplace/sources/classic.js';
 import { extractViewVars, parseMillerLots } from '../src/marketplace/sources/miller.js';
 import { extractGoldinConfig, parseGoldinLots } from '../src/marketplace/sources/goldin.js';
@@ -227,6 +228,33 @@ test('hibid: zero-bid lots report null price, not $0', () => {
   ]);
   assert.equal(out[0].price, null);
   assert.equal(out[1].price, 25);
+});
+
+test('heritage: relative end times become ISO timestamps', () => {
+  const now = Date.parse('2026-07-29T12:00:00Z');
+  assert.equal(parseHeritageEnds('25 days', now), '2026-08-23T12:00:00.000Z');
+  assert.equal(parseHeritageEnds('2 days 6 hours', now), '2026-07-31T18:00:00.000Z');
+  assert.equal(parseHeritageEnds('45 minutes', now), '2026-07-29T12:45:00.000Z');
+  assert.match(parseHeritageEnds('Aug 9, 2026', now), /^2026-08-09T/);
+  assert.equal(parseHeritageEnds('Auction Ended', now), null);
+  assert.equal(parseHeritageEnds(null, now), null);
+});
+
+test('cia: lot-link fallback parses skinned pages without stock blocks', () => {
+  const html = `
+    <div class="custom-skin-card">
+      <a href="/Event/LotDetails/4696386/1996-skybox-kobe"><img src="x.jpg"></a>
+      <a href="/Event/LotDetails/4696386/1996-skybox-kobe">1996 Skybox Kobe Bryant PSA 8</a>
+      <div class="bid">Current Bid: $1,225.00</div>
+      <span data-action-time="2026-08-10T21:30:00"></span>
+    </div>
+    <a href="/Listing/Details/555/other">2003 Topps Chrome LeBron James BGS 9.5 rookie</a>`;
+  const out = parseAuctionWorxLotLinks(html);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].listingId, '4696386');
+  assert.equal(out[0].price, 1225);
+  assert.equal(out[0].endsAt, '2026-08-10T21:30:00');
+  assert.equal(out[1].listingId, '555');
 });
 
 test('cia: data-listingid on non-section elements still parses', () => {

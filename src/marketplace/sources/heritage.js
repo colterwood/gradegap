@@ -11,6 +11,25 @@ import { saveDebug, debugLog } from './util.js';
 
 const SITE = 'https://sports.ha.com';
 
+// Live tiles show RELATIVE end times ("25 days", "6 hours 12 minutes") —
+// convert to an approximate ISO timestamp; absolute dates pass through.
+// Exported for tests.
+export function parseHeritageEnds(text, now = Date.now()) {
+  if (!text) return null;
+  const s = String(text).trim();
+  let ms = 0;
+  const take = (re, unit) => {
+    const m = s.match(re);
+    if (m) ms += Number(m[1]) * unit;
+  };
+  take(/(\d+)\s*day/i, 24 * 60 * 60 * 1000);
+  take(/(\d+)\s*hour/i, 60 * 60 * 1000);
+  take(/(\d+)\s*min/i, 60 * 1000);
+  if (ms > 0) return new Date(now + ms).toISOString();
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 export function createHeritageSource() {
   let lease = null;
   let page = null;
@@ -50,14 +69,14 @@ export function createHeritageSource() {
             price: priceText ? parseFloat(priceText.replace(/[$,]/g, '')) : null,
             currency: 'USD',
             listingType: 'auction',
-            // e.g. "Aug 9, 2026" — parseable by Date; time-of-day granularity
-            // isn't in the tile, the runner's toSqlDate handles either way.
-            endsAt: endsText,
+            endsAt: endsText, // raw here; normalized below (browser context can't share helpers)
             imageUrl: li.querySelector('img.thumbnail')?.src ?? null,
             seller: null,
           };
         }).filter(Boolean)
       ).catch(() => []);
+
+      for (const r of results) r.endsAt = parseHeritageEnds(r.endsAt);
 
       if (results.length === 0) {
         // 0 can be legit (no live lots match) or a bot-block/redirect — the

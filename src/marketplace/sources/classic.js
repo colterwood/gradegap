@@ -10,7 +10,8 @@
 import { fetchHtml, toNumber, absUrl, decodeEntities, saveDebug, debugLog } from './util.js';
 
 const SITE = 'https://www.classicauctions.net';
-const MAX_PAGES = 12;
+const MAX_PAGES = 6;
+const PAGE_TIMEOUT_MS = 12_000;
 
 const stripTags = (s) => decodeEntities(String(s ?? '').replace(/<[^>]+>/g, ' '));
 
@@ -63,10 +64,12 @@ export function createClassicSource() {
         const url = page === 1
           ? `${SITE}/catalog.aspx?lotsperpage=100`
           : `${SITE}/catalog.aspx?lotsperpage=100&page=${page}`;
+        debugLog('classic', `fetching catalog page ${page}…`);
         let html;
         try {
-          html = await fetchHtml(url);
-        } catch {
+          html = await fetchHtml(url, { timeoutMs: PAGE_TIMEOUT_MS });
+        } catch (err) {
+          debugLog('classic', `page ${page} failed (${err.message}) — stopping crawl`);
           break; // paging past the end / transient failure — keep what we have
         }
         if (page === 1) firstPageHtml = html;
@@ -75,7 +78,7 @@ export function createClassicSource() {
         const fresh = lots.filter((l) => !all.some((a) => a.listingId === l.listingId));
         if (fresh.length === 0) break; // no new lots → past the last page
         all.push(...fresh);
-        await new Promise((r) => setTimeout(r, 1500));
+        await new Promise((r) => setTimeout(r, 800));
       }
       if (all.length === 0 && firstPageHtml != null) {
         // No lot anchors at all: either between auctions or the markup moved.

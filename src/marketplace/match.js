@@ -51,19 +51,30 @@ export function yearRegex(year) {
   );
 }
 
-// "PSA 10", "PSA10", "PSA-10", "PSA GEM MINT 10", "PSA GEM MT 10" all hit;
-// "PSA 10.5"/"PSA 9" for a PSA-10 target do not (grade must match exactly).
+// "PSA 10", "PSA10", "PSA-10", "PSA GEM MINT 10", and word-label forms like
+// "PSA Mint 9" / "PSA NM-MT 8" / "PSA EX-MT 6" (Heritage writes grades this
+// way) all hit; "PSA 10.5"/"PSA 9" for a PSA-10 target do not (grade must
+// match exactly). Only known grade-label words may sit between company and
+// number — "PSA lot of 9" must NOT match.
+const GRADE_WORDS = '(?:gem|mint|mt|nm|ex|vg|gd|fr|pr|near|pristine|authentic)';
+
 export function slabRegex(company, grade) {
   const g = esc(String(grade));
   // No \b between company and grade: "PSA10" has no letter/digit boundary.
+  // Trailing lookahead blocks decimals ("10.5", "9.5") but NOT sentence
+  // punctuation ("…PSA Mint 9." is a match).
   return new RegExp(
-    `\\b${esc(company)}[\\s:–-]*(?:gem\\s*(?:mint|mt)[\\s:–-]*)?${g}(?![\\d.])`,
+    `\\b${esc(company)}[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}${g}(?!\\d)(?!\\.\\d)`,
     'i'
   );
 }
 
-// Every "GRADER n" mention in a title, for wrong-slab penalties.
-const ANY_SLAB_RE = new RegExp(`\\b(${GRADERS.join('|')})[\\s:–-]*(\\d{1,2}(?:\\.5)?)(?![\\d.])`, 'gi');
+// Every "GRADER n" mention in a title (word-label forms included), for
+// wrong-slab penalties.
+const ANY_SLAB_RE = new RegExp(
+  `\\b(${GRADERS.join('|')})[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}(\\d{1,2}(?:\\.5)?)(?!\\d)(?!\\.\\d)`,
+  'gi'
+);
 
 // Words that mean "this is not the real slab you watched".
 const BAD_WORDS = ['reprint', 'replica', 'custom', 'proxy', 'digital', 'novelty', 'lot', 'break'];

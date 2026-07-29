@@ -48,6 +48,17 @@ test('slabRegex is tolerant of formatting but exact on grade', () => {
   assert.ok(!re.test('BGS 10'));
 });
 
+test('slabRegex accepts word-label grades (Heritage style) but not arbitrary words', () => {
+  // Real Heritage title forms
+  assert.ok(slabRegex('PSA', '9').test('1986 Fleer Sticker Michael Jordan #8 PSA Mint 9.'));
+  assert.ok(slabRegex('PSA', '8').test('2006 Fleer Michael Jordan #MJA-2 PSA NM-MT 8, PSA/DNA Auto 10'));
+  assert.ok(slabRegex('PSA', '7').test('1986 Fleer Michael Jordan Rookie #57 PSA NM 7.'));
+  assert.ok(slabRegex('PSA', '10').test('#57 PSA Gem Mint 10.'));
+  // Arbitrary words between company and number must not bridge the gap
+  assert.ok(!slabRegex('PSA', '9').test('PSA lot of 9 cards'));
+  assert.ok(!slabRegex('PSA', '10').test('PSA graded set of 10'));
+});
+
 test('real-world-shaped title matches with a high score', () => {
   const r = scoreListing(luka, '2018-19 Panini Prizm Luka Doncic #280 Rookie RC PSA 10 GEM MINT');
   assert.equal(r.ok, true);

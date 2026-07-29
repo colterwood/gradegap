@@ -33,7 +33,9 @@ const q = makeQueries(db);
 const source = await REGISTRY[name]();
 
 try {
+  console.log(`starting ${name}…`);
   await withTimeout(source.start({ q, db }), 60_000, `${name} start`);
+  console.log(`searching ${name} for "${query}" (up to 90s)…`);
   const t0 = Date.now();
   const results = await withTimeout(source.search({ text: query }), 90_000, `${name} search`);
   console.log(`\n${source.name}: ${results.length} raw listings for "${query}" in ${Date.now() - t0}ms\n`);
@@ -44,6 +46,11 @@ try {
     if (r.endsAt) console.log(`    ends ${r.endsAt}`);
   }
   if (results.length > 20) console.log(`… and ${results.length - 20} more`);
+} catch (err) {
+  console.error(`\n${name} FAILED: ${err.message}`);
+  if (!debug) console.error(`re-run with --debug to capture raw payloads for a bug report`);
+  await source.close().catch(() => {});
+  process.exit(1);
 } finally {
   await source.close().catch(() => {});
 }
