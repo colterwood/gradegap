@@ -122,3 +122,20 @@ td a:hover { text-decoration: underline; }
 .date { color: var(--muted); font-size: 13px; white-space: nowrap; }
 
 .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+
+/* recency dot */
+.dot-col, .dot-cell { width: 22px; text-align: center; padding-left: 10px; padding-right: 0; }
+.dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.dot-green { background: #2e9e5b; }
+.dot-yellow { background: #e0a400; }
+.dot-red { background: #d64545; }
+
+.summary-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.legend { display: flex; gap: 16px; color: var(--muted); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend .dot { width: 8px; height: 8px; }

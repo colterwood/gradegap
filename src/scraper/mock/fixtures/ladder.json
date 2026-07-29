@@ -12,7 +12,7 @@
   { "id": "sgc-88fleer17", "psaSpecId": 302300, "condition": "SGC 10", "gradingCompany": "sgc", "player": "Michael Jordan", "set": "Fleer", "year": "1988", "number": "17", "variation": "Base", "currentValue": 1450, "marketValue": 1390, "lastSoldDate": "2026-07-21", "pop": 620 },
   { "id": "psa-88fleer17", "psaSpecId": 302300, "condition": "PSA 10", "gradingCompany": "psa", "player": "Michael Jordan", "set": "Fleer", "year": "1988", "number": "17", "variation": "Base", "currentValue": 5100, "marketValue": 5350, "lastSoldDate": "2026-07-12", "pop": 7400 },
 
-  { "id": "sgc-89hoops200", "psaSpecId": 303400, "condition": "SGC 10", "gradingCompany": "sgc", "player": "Michael Jordan", "set": "Hoops", "year": "1989", "number": "200", "variation": "Base", "currentValue": 340, "marketValue": 355, "lastSoldDate": "2026-07-19", "pop": 1500 },
+  { "id": "sgc-89hoops200", "psaSpecId": 303400, "condition": "SGC 10", "gradingCompany": "sgc", "player": "Michael Jordan", "set": "Hoops", "year": "1989", "number": "200", "variation": "Base", "currentValue": 340, "marketValue": 355, "lastSoldDate": "2025-09-15", "pop": 1500 },
   { "id": "psa-89hoops200", "psaSpecId": 303400, "condition": "PSA 10", "gradingCompany": "psa", "player": "Michael Jordan", "set": "Hoops", "year": "1989", "number": "200", "variation": "Base", "currentValue": 900, "marketValue": 875, "lastSoldDate": "2026-07-16", "pop": 12000 },
 
   { "id": "sgc-90skybox41", "psaSpecId": 304500, "condition": "SGC 10", "gradingCompany": "sgc", "player": "Michael Jordan", "set": "Skybox", "year": "1990", "number": "41", "variation": "Base", "currentValue": 210, "marketValue": 205, "lastSoldDate": "2026-07-08", "pop": 2200 },
@@ -20,8 +20,8 @@
 
   { "id": "psa-91ud44", "psaSpecId": 305600, "condition": "PSA 10", "gradingCompany": "psa", "player": "Michael Jordan", "set": "Upper Deck", "year": "1991", "number": "44", "variation": "Base", "currentValue": 320, "marketValue": 310, "lastSoldDate": "2026-07-11", "pop": 15000 },
 
-  { "id": "sgc-92ud23", "psaSpecId": 306700, "condition": "SGC 10", "gradingCompany": "sgc", "player": "Michael Jordan", "set": "Upper Deck", "year": "1992", "number": "23", "variation": "Base", "currentValue": 145, "marketValue": 150, "lastSoldDate": "2026-07-22", "pop": 2600 },
-  { "id": "psa-92ud23", "psaSpecId": 306700, "condition": "PSA 10", "gradingCompany": "psa", "player": "Michael Jordan", "set": "Upper Deck", "year": "1992", "number": "23", "variation": "Base", "currentValue": 260, "marketValue": 255, "lastSoldDate": "2026-07-15", "pop": 18000 },
+  { "id": "sgc-92ud23", "psaSpecId": 306700, "condition": "SGC 10", "gradingCompany": "sgc", "player": "Michael Jordan", "set": "Upper Deck", "year": "1992", "number": "23", "variation": "Base", "currentValue": 145, "marketValue": 150, "lastSoldDate": "2024-01-10", "pop": 2600 },
+  { "id": "psa-92ud23", "psaSpecId": 306700, "condition": "PSA 10", "gradingCompany": "psa", "player": "Michael Jordan", "set": "Upper Deck", "year": "1992", "number": "23", "variation": "Base", "currentValue": 260, "marketValue": 255, "lastSoldDate": "2023-11-05", "pop": 18000 },
 
   { "id": "sgc-93finest1", "psaSpecId": 307800, "condition": "SGC 10", "gradingCompany": "sgc", "player": "Michael Jordan", "set": "Topps Finest", "year": "1993", "number": "1", "variation": "Base", "currentValue": 1250, "marketValue": 1300, "lastSoldDate": "2026-06-30", "pop": 340 },
   { "id": "psa-93finest1", "psaSpecId": 307800, "condition": "PSA 10", "gradingCompany": "psa", "player": "Michael Jordan", "set": "Topps Finest", "year": "1993", "number": "1", "variation": "Base", "currentValue": 2900, "marketValue": 2750, "lastSoldDate": "2026-07-09", "pop": 4100 },

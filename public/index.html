@@ -62,10 +62,18 @@
   </section>
 
   <main>
-    <p id="summary" class="summary"></p>
+    <div class="summary-row">
+      <p id="summary" class="summary"></p>
+      <div class="legend">
+        <span><i class="dot dot-green"></i> traded &lt;3mo</span>
+        <span><i class="dot dot-red"></i> cheaper side &gt;3mo / never</span>
+        <span><i class="dot dot-yellow"></i> both &gt;12mo</span>
+      </div>
+    </div>
     <table id="results">
       <thead>
         <tr>
+          <th class="dot-col" title="Recency of the last sale"></th>
           <th>Card</th>
           <th class="num">SGC 10 GM</th>
           <th class="num">PSA 10</th>

@@ -10,6 +10,43 @@ const $ = (id) => document.getElementById(id);
 const fmtMoney = (n) =>
   n == null ? '—' : n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
+// --- recency dot -----------------------------------------------------------
+// Months since a YYYY-MM-DD last-sale date; a missing date = never sold.
+function monthsSince(dateStr) {
+  if (!dateStr) return Infinity;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return Infinity;
+  return (Date.now() - d.getTime()) / (1000 * 60 * 60 * 24 * 30.44);
+}
+
+function fmtAge(m) {
+  if (m === Infinity) return 'never sold';
+  if (m < 1) return `${Math.max(1, Math.round(m * 30.44))}d ago`;
+  if (m < 12) return `${Math.round(m)}mo ago`;
+  return `${(m / 12).toFixed(1)}yr ago`;
+}
+
+// Yellow-first precedence so all three tiers are reachable:
+//   yellow = both sides last sold >12mo · red = the cheaper (direction) side
+//   >3mo or never · green = otherwise.
+function recencyDot(row) {
+  const sgcM = monthsSince(row.sgc_last_sale_date);
+  const psaM = monthsSince(row.psa_last_sale_date);
+  const cheaperIsSgc = row.sgc_price <= row.psa_price;
+  const dirM = cheaperIsSgc ? sgcM : psaM;
+
+  let color;
+  if (sgcM > 12 && psaM > 12) color = 'yellow';
+  else if (dirM > 3) color = 'red';
+  else color = 'green';
+
+  const cheapLabel = cheaperIsSgc ? 'SGC' : 'PSA';
+  const title =
+    `SGC 10 GM last sold ${fmtAge(sgcM)} · PSA 10 last sold ${fmtAge(psaM)}` +
+    ` — dot tracks the cheaper side (${cheapLabel})`;
+  return { color, title };
+}
+
 let pollTimer = null;
 let wasRunning = false;
 
@@ -41,7 +78,9 @@ async function loadResults() {
     const link = row.cl_url
       ? `<a href="${row.cl_url}" target="_blank" rel="noopener">${row.name}</a>`
       : row.name;
+    const dot = recencyDot(row);
     tr.innerHTML = `
+      <td class="dot-cell"><span class="dot dot-${dot.color}" title="${dot.title}"></span></td>
       <td>${link}</td>
       <td class="num">${fmtMoney(row.sgc_price)}</td>
       <td class="num">${fmtMoney(row.psa_price)}</td>
