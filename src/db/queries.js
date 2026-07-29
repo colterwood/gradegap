@@ -18,15 +18,22 @@ export function makeQueries(db) {
   `);
 
   const upsertGradePrice = db.prepare(`
-    INSERT INTO grade_prices (card_id, grading_company, grade, cl_value, last_sale_price, last_sale_date, sync_run_id, captured_at)
-    VALUES (@cardId, @company, @grade, @clValue, @lastSalePrice, @lastSaleDate, @syncRunId, datetime('now'))
+    INSERT INTO grade_prices (card_id, grading_company, grade, cl_value, last_sale_price, last_sale_date, population, sync_run_id, captured_at)
+    VALUES (@cardId, @company, @grade, @clValue, @lastSalePrice, @lastSaleDate, @population, @syncRunId, datetime('now'))
     ON CONFLICT(card_id, grading_company, grade) DO UPDATE SET
       cl_value = excluded.cl_value,
       last_sale_price = excluded.last_sale_price,
       last_sale_date = excluded.last_sale_date,
+      population = excluded.population,
       sync_run_id = excluded.sync_run_id,
       captured_at = excluded.captured_at
   `);
+
+  const upsertPlayer = db.prepare(`
+    INSERT INTO players (name, enabled) VALUES (@name, 1)
+    ON CONFLICT(name) DO NOTHING
+  `);
+  const getPlayerIdByName = db.prepare(`SELECT id FROM players WHERE name = ?`);
 
   const getCardByClId = db.prepare(`SELECT * FROM cards WHERE cl_card_id = ?`);
 
@@ -60,9 +67,11 @@ export function makeQueries(db) {
           sgc.last_sale_price AS sgc_last_sale_price,
           psa.last_sale_price AS psa_last_sale_price,
           sgc.cl_value AS sgc_cl_value,
-          psa.cl_value AS psa_cl_value
+          psa.cl_value AS psa_cl_value,
+          sgc.population AS sgc_pop,
+          psa.population AS psa_pop
         FROM cards c
-        JOIN players p ON p.id = c.player_id
+        LEFT JOIN players p ON p.id = c.player_id
         LEFT JOIN grade_prices sgc ON sgc.card_id = c.id
           AND sgc.grading_company = '${TARGETS.sgc.company}' AND sgc.grade = '${TARGETS.sgc.grade}'
         LEFT JOIN grade_prices psa ON psa.card_id = c.id
@@ -105,13 +114,21 @@ export function makeQueries(db) {
     };
   }
 
+  // Resolve a player name to an id, creating the player row on first sight.
+  function ensurePlayer(name) {
+    if (!name) return null;
+    upsertPlayer.run({ name });
+    return getPlayerIdByName.get(name)?.id ?? null;
+  }
+
   return {
     upsertCard,
     upsertGradePrice,
+    ensurePlayer,
     getCardByClId,
     resultsQuery,
 
-    listPlayers: db.prepare(`SELECT * FROM players ORDER BY name`),
+    listPlayers: db.prepare(`SELECT * FROM players WHERE search_term IS NOT NULL OR id IN (SELECT DISTINCT player_id FROM cards) ORDER BY name`),
     getPlayerByName: db.prepare(`SELECT * FROM players WHERE name = ?`),
 
     createSyncRun: db.prepare(`INSERT INTO sync_runs DEFAULT VALUES`),

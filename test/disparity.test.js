@@ -26,9 +26,9 @@ function seedDb() {
     });
     const cardId = q.getCardByClId.get(clCardId).id;
     if (sgc.v !== null || sgc.s !== null) {
-      q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10', clValue: sgc.v, lastSalePrice: sgc.s, lastSaleDate: '2026-07-01', syncRunId: null });
+      q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10', clValue: sgc.v, lastSalePrice: sgc.s, lastSaleDate: '2026-07-01', population: null, syncRunId: null });
     }
-    q.upsertGradePrice.run({ cardId, company: 'PSA', grade: '10', clValue: psa.v, lastSalePrice: psa.s, lastSaleDate: '2026-07-02', syncRunId: null });
+    q.upsertGradePrice.run({ cardId, company: 'PSA', grade: '10', clValue: psa.v, lastSalePrice: psa.s, lastSaleDate: '2026-07-02', population: null, syncRunId: null });
   }
   return { db, q };
 }
@@ -91,7 +91,7 @@ test('SGC 10 Pristine rows never enter the Gem Mint comparison', () => {
   const { q } = seedDb();
   const cardId = q.getCardByClId.get('c1').id;
   // a Pristine 10 worth 20x the Gem Mint 10 — must not change the comparison
-  q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10 PRI', clValue: 20000, lastSalePrice: 19500, lastSaleDate: '2026-07-01', syncRunId: null });
+  q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10 PRI', clValue: 20000, lastSalePrice: 19500, lastSaleDate: '2026-07-01', population: null, syncRunId: null });
   const r = q.resultsQuery(base);
   const c1 = r.rows.find((x) => x.name === '1986 Fleer #57');
   assert.equal(c1.sgc_price, 1000);
@@ -101,7 +101,7 @@ test('SGC 10 Pristine rows never enter the Gem Mint comparison', () => {
 test('upsert replaces prices instead of duplicating', () => {
   const { q } = seedDb();
   const cardId = q.getCardByClId.get('c1').id;
-  q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10', clValue: 1100, lastSalePrice: 1050, lastSaleDate: '2026-07-20', syncRunId: null });
+  q.upsertGradePrice.run({ cardId, company: 'SGC', grade: '10', clValue: 1100, lastSalePrice: 1050, lastSaleDate: '2026-07-20', population: null, syncRunId: null });
   const r = q.resultsQuery(base);
   const c1 = r.rows.find((x) => x.name === '1986 Fleer #57');
   assert.equal(c1.sgc_price, 1100);

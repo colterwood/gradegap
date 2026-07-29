@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS players (
   id            INTEGER PRIMARY KEY,
   name          TEXT NOT NULL UNIQUE,
-  search_term   TEXT NOT NULL,
+  search_term   TEXT,
   cl_player_id  TEXT,
   enabled       INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS players (
 
 CREATE TABLE IF NOT EXISTS cards (
   id            INTEGER PRIMARY KEY,
-  player_id     INTEGER NOT NULL REFERENCES players(id),
+  player_id     INTEGER REFERENCES players(id),
   cl_card_id    TEXT NOT NULL UNIQUE,
   name          TEXT NOT NULL,
   set_name      TEXT,
@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS grade_prices (
   cl_value         REAL,
   last_sale_price  REAL,
   last_sale_date   TEXT,
+  population       INTEGER,
   sync_run_id      INTEGER REFERENCES sync_runs(id),
   captured_at      TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(card_id, grading_company, grade)

@@ -12,10 +12,14 @@ in via `.env`) and never leaves your computer.
 ## How it works
 
 - Click **Sync** in the web UI → a Chromium window (driven by Playwright,
-  logged in as you) browses Card Ladder like a person would, with polite
-  3–7 second pauses, and records the price data Card Ladder's own pages load.
-- Results are stored in a local SQLite database (`data/gradegap.db`), so the
-  results page is instant and works offline.
+  logged in as you) opens the Ladder and pulls its grade-filtered list API in
+  bulk: one pass filtered to **SGC 10 Gem Mint**, one to **PSA 10**. Each page
+  of that API returns many cards *with their values already on the row*, so
+  there are **no per-card page visits** — a full catalog sync is a few hundred
+  JSON requests (minutes), not one page load per card.
+- Both grades are joined locally by Card Ladder's own card id (`psaSpecId`),
+  and everything is stored in a local SQLite database (`data/gradegap.db`), so
+  the results page is instant and works offline.
 - The table ranks cards by disparity — toggleable between **% difference**
   and **$ difference**, between **CL Value** and **Last Sale** price basis,
   and filterable by direction (SGC cheaper / PSA cheaper), minimum price, and
@@ -73,26 +77,26 @@ npm start
 npm start          # → http://localhost:4000, click Sync when you want fresh data
 ```
 
-- A sync visits every card once (~3–7s per card). Michael Jordan alone is a
-  few hundred cards, so expect a sync to take a while — the progress bar
-  shows where it is, **Cancel** stops it cleanly, and an interrupted sync can
-  be **Resumed** without redoing finished cards.
+- A sync pages through the whole SGC 10 Gem Mint and PSA 10 lists (a few
+  hundred requests total, a few minutes). The progress bar shows where it is,
+  **Cancel** stops it cleanly, and an interrupted sync can be **Resumed**.
 - If Card Ladder logs you out mid-sync, the run stops with a message — just
   `npm run login` again and Resume.
 
-## Adding players
+## Scoping to specific players (optional)
 
-Edit `config/players.json`:
+By default the sync covers the **whole catalog** (every card with an SGC 10
+Gem Mint value — the limiting side, only ~500 cards). To restrict it to
+certain players, list them in `config/players.json`:
 
 ```json
 [
-  { "name": "Michael Jordan", "searchTerm": "Michael Jordan", "enabled": true },
-  { "name": "LeBron James", "searchTerm": "LeBron James", "enabled": true }
+  { "name": "Michael Jordan" },
+  { "name": "LeBron James" }
 ]
 ```
 
-Restart the server and Sync. (Start small — every enabled player's full card
-list is visited on each sync.)
+An empty array (`[]`, the default) means everything. Restart and Sync.
 
 ## Development without Card Ladder
 

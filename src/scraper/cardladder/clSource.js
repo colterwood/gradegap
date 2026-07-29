@@ -1,116 +1,73 @@
-// The real Card Ladder data source. Same interface as mockSource:
-//   start() / enumerateCards(playerRow) / fetchCardPrices(cardRow) / close()
+// The real Card Ladder source. It drives a logged-in browser to the Ladder,
+// captures the app's own Firebase Bearer token from live requests, then
+// replays the Ladder's JSON search endpoint directly from inside the page
+// (same origin/cookies/CORS the app uses) — paginating without rendering a
+// single card page.
+//
+// Interface (shared with the mock source):
+//   start()                              -> open browser, reach the Ladder
+//   fetchLadderPage({condition,page,limit}) -> { status, body:{hits,totalHits} }
+//   refreshAuth()                        -> reload to mint a fresh token
+//   close()
 
-import { launchBrowser, looksLoggedOut, APP_URL } from '../browser.js';
-import { attachCapture, saveFailure } from '../capture.js';
-import { mightContainCards, mightContainPrices } from './endpoints.js';
-import { parseCards, parsePrices } from './adapter.js';
+import { launchBrowser, looksLoggedOut } from '../browser.js';
+import { buildLadderUrl } from './endpoints.js';
 import * as nav from './navigate.js';
 
 export function createCardLadderSource() {
   let context = null;
   let page = null;
+  let lastAuth = null;
 
-  // Collectors the capture callback feeds while a flow is running.
-  let cardCollector = null;
-  let priceCollector = null;
-  let unclaimed = [];
+  function watchAuth(ctx) {
+    ctx.on('request', (req) => {
+      try {
+        const auth = req.headers()['authorization'];
+        if (auth && req.url().includes('cardladder.com')) lastAuth = auth;
+      } catch { /* header access can throw on some requests */ }
+    });
+  }
 
   return {
     name: 'cardladder',
 
     async start() {
       context = await launchBrowser();
-      attachCapture(context, {
-        onPayload: async (entry) => {
-          let claimed = false;
-          if (cardCollector && mightContainCards(entry.url)) {
-            const res = parseCards(entry, cardCollector.player);
-            if (res.ok) {
-              for (const c of res.data) cardCollector.cards.set(c.clCardId, c);
-              claimed = true;
-            }
-          }
-          if (priceCollector && mightContainPrices(entry.url)) {
-            const res = parsePrices(entry);
-            if (res.ok) {
-              for (const p of res.data) priceCollector.prices.set(`${p.company}|${p.grade}`, p);
-              claimed = true;
-            }
-          }
-          if (!claimed) unclaimed.push({ url: entry.url, json: entry.json });
-          return claimed;
-        },
-      });
+      watchAuth(context);
       page = context.pages()[0] ?? (await context.newPage());
-      await nav.goToApp(page);
+      await nav.goToLadder(page);
       if (await looksLoggedOut(page)) {
         throw new Error('Not logged in to Card Ladder — run `npm run login` first.');
       }
+      // Let the Ladder's own search fire so we capture a Bearer token.
+      await page.waitForTimeout(2500);
     },
 
-    async enumerateCards(playerRow) {
-      cardCollector = { player: { name: playerRow.name }, cards: new Map() };
-      unclaimed = [];
-      try {
-        await nav.searchPlayer(page, playerRow.search_term);
-        await nav.openFirstPlayerResult(page, playerRow.name);
-        await nav.exhaustCardList(page);
+    async refreshAuth() {
+      await nav.goToLadder(page);
+      await page.waitForTimeout(2500);
+      if (await looksLoggedOut(page)) {
+        throw new Error('Session expired — run `npm run login` again.');
+      }
+    },
 
-        if (cardCollector.cards.size === 0) {
-          // network interception found nothing recognizable — try the DOM
-          const links = await nav.scrapeCardLinksFromDom(page);
-          for (const l of links) {
-            const id = l.href.split('/card/')[1]?.split(/[/?#]/)[0];
-            if (!id) continue;
-            const yearMatch = l.text.match(/\b(19|20)\d{2}\b/);
-            cardCollector.cards.set(id, {
-              clCardId: id,
-              name: l.text,
-              setName: null,
-              year: yearMatch ? Number(yearMatch[0]) : null,
-              cardNumber: null,
-              parallel: null,
-              clUrl: new URL(l.href, APP_URL).href,
-              raw: { domFallback: true, ...l },
-            });
+    async fetchLadderPage({ condition, page: pageNum, limit }) {
+      const url = buildLadderUrl({ condition, page: pageNum, limit });
+      return page.evaluate(
+        async ({ url, auth }) => {
+          try {
+            const headers = { accept: 'application/json' };
+            if (auth) headers.authorization = auth;
+            const r = await fetch(url, { headers, credentials: 'include' });
+            let body = null;
+            try { body = await r.json(); } catch { /* non-JSON error page */ }
+            return { status: r.status, body };
+          } catch (e) {
+            return { status: 0, body: null, error: String(e) };
           }
-        }
-
-        if (cardCollector.cards.size === 0) {
-          saveFailure(`enumerate-${playerRow.name}`, {
-            note: 'No cards recognized from network or DOM. Inspect these unclaimed payloads and update endpoints.js/adapter.js.',
-            url: page.url(),
-            unclaimedCount: unclaimed.length,
-            unclaimed: unclaimed.slice(0, 25),
-          });
-        }
-        return [...cardCollector.cards.values()];
-      } finally {
-        cardCollector = null;
-      }
-    },
-
-    async fetchCardPrices(cardRow) {
-      priceCollector = { prices: new Map() };
-      unclaimed = [];
-      try {
-        await nav.openCardPage(page, cardRow);
-        if (await looksLoggedOut(page)) {
-          throw new Error('Session expired — run `npm run login` again.');
-        }
-        if (priceCollector.prices.size === 0) {
-          saveFailure(`prices-${cardRow.cl_card_id}`, {
-            note: 'No grade prices recognized on this card page. Inspect these unclaimed payloads and update endpoints.js/adapter.js.',
-            card: { id: cardRow.cl_card_id, name: cardRow.name, url: cardRow.cl_url },
-            unclaimedCount: unclaimed.length,
-            unclaimed: unclaimed.slice(0, 25),
-          });
-        }
-        return [...priceCollector.prices.values()];
-      } finally {
-        priceCollector = null;
-      }
+        },
+        { url, auth: lastAuth }
+      );
     },
 
     async close() {

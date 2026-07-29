@@ -1,12 +1,13 @@
 import express from 'express';
-import { config, loadPlayers } from './config.js';
-import { openDb, syncPlayersFromConfig } from './db/db.js';
+import { config } from './config.js';
+import { openDb } from './db/db.js';
 import { makeQueries } from './db/queries.js';
 import { createSyncManager } from './sync/syncRunner.js';
 import { makeApiRouter } from './routes/api.js';
 
+// Players are discovered from the Ladder crawl itself, so there's no config
+// seeding here anymore; config/players.json is only an optional allowlist.
 const db = openDb();
-syncPlayersFromConfig(db, loadPlayers());
 const q = makeQueries(db);
 const syncManager = createSyncManager(db, q);
 

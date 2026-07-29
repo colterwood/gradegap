@@ -1,7 +1,0 @@
-{
-  "url": "https://app.cardladder.com/cdn-cgi/rum?",
-  "method": "POST",
-  "status": 204,
-  "requestBody": "{\"memory\":{\"totalJSHeapSize\":28761314,\"usedJSHeapSize\":20760414,\"jsHeapSizeLimit\":4395630592},\"resources\":[],\"referrer\":\"\",\"eventType\":1,\"firstPaint\":0,\"firstContentfulPaint\":0,\"startTime\":1785280532105,\"versions\":{\"fl\":\"2024.11.0\",\"js\":\"2026.6.0\",\"timings\":2},\"pageloadId\":\"c7b467f9-bc40-49fa-8662-059170c4c8d0\",\"location\":\"https://app.cardladder.com/\",\"nt\":\"navigate\",\"timingsV2\":{\"nextHopProtocol\":\"h2\",\"domainLookupStart\":411.80000019073486,\"domainLookupEnd\":413.5,\"connectStart\":413.5,\"connectEnd\":537.7000000476837,\"requestStart\":537.9000000953674,\"responseStart\":783.8000001907349,\"responseEnd\":784.4000000953674,\"domInteractive\":1013.1000001430511,\"domComplete\":1552.5,\"loadEventStart\":1552.6000001430511,\"loadEventEnd\":1552.8000001907349,\"finalResponseHeadersStart\":783.8000001907349,\"firstInterimResponseStart\":0,\"transferSize\":1540,\"decodedBodySize\":2402},\"dt\":\"\",\"siteToken\":\"18b8a8f3df4147faa9728165704afa74\",\"st\":2}",
-  "body": ""
-}

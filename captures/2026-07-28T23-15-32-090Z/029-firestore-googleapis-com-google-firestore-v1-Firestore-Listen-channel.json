@@ -1,7 +1,0 @@
-{
-  "url": "https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?gsessionid=i7dCHy1n7iKSS0EyPDn9zVxZ8Wegx6hoZsu79YHDwKVYzACxAMzKcw&VER=8&database=projects%2Fcardladder-71d53%2Fdatabases%2F(default)&RID=rpc&SID=19MsR1ec6AgGWE1YQ3rrNw&AID=57&CI=0&TYPE=xmlhttp&zx=4vfvl7d7ttjw&t=1",
-  "method": "GET",
-  "status": 200,
-  "requestBody": null,
-  "body": "15\n[[58,[\"noop\"]]]122\n[[59,[{\n  \"targetChange\": {\n    \"resumeToken\": \"CgkIsvyKxcD2lQM=\",\n    \"readTime\": \"2026-07-28T23:16:50.876978Z\"\n  }\n}\n]]]15\n[[60,[\"noop\"]]]122\n[[61,[{\n  \"targetChange\": {\n    \"resumeToken\": \"CgkIiLXG2sD2lQM=\",\n    \"readTime\": \"2026-07-28T23:17:35.891080Z\"\n  }\n}\n]]]"
-}

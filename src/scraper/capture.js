@@ -53,6 +53,20 @@ function describeHeaders(headers) {
   return out;
 }
 
+// Tokens can ride inside request BODIES and URLs too (Firestore's Listen/Write
+// channels url-encode "Authorization:Bearer <jwt>" into the POST body). Scrub
+// any JWT and any bearer/access/id token from a string before it's written.
+function scrubSecrets(str) {
+  if (typeof str !== 'string' || !str) return str;
+  return str
+    // JWTs (header.payload.signature)
+    .replace(/eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]+/g, '<redacted-jwt>')
+    // Bearer <token>, url-encoded or not
+    .replace(/(Bearer(?:%20|\s)+)[A-Za-z0-9._~+/=-]+/gi, '$1<redacted>')
+    // access_token / id_token / refresh_token / gsessionid = value (query or body)
+    .replace(/((?:access_token|id_token|refresh_token|gsessionid|auth)=)[A-Za-z0-9._~+/=-]+/gi, '$1<redacted>');
+}
+
 const slug = (s) => s.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 80);
 
 // Watches all responses in a browser context. Recognized payloads are pushed
@@ -102,13 +116,15 @@ export function attachCapture(context, { discovery = config.discovery, onPayload
       const n = String(++counter).padStart(3, '0');
       const u = new URL(url);
       const file = `${n}-${slug(u.host)}-${slug(u.pathname)}.json`;
+      const safeUrl = scrubSecrets(url);
+      const safeBody = json ?? scrubSecrets(text);
       writeFileSync(
         path.join(dir, file),
-        JSON.stringify({ url, method: entry.method, status: entry.status, requestHeaders: entry.requestHeaders, requestBody: entry.requestBody, body: json ?? text }, null, 2)
+        JSON.stringify({ url: safeUrl, method: entry.method, status: entry.status, requestHeaders: entry.requestHeaders, requestBody: scrubSecrets(entry.requestBody), body: safeBody }, null, 2)
       );
       appendFileSync(
         path.join(dir, 'index.jsonl'),
-        JSON.stringify({ n, file, url, method: entry.method, status: entry.status, bytes: text?.length ?? 0, claimed }) + '\n'
+        JSON.stringify({ n, file, url: safeUrl, method: entry.method, status: entry.status, bytes: text?.length ?? 0, claimed }) + '\n'
       );
       seen.push({ url, claimed });
     }
