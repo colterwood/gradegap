@@ -3,8 +3,14 @@
 // Frankfurter API (ECB reference rates) and are cached in kv_cache so checks
 // keep working offline; a hardcoded approximation is the last resort.
 
+import { fetchWithTimeout } from './sources/util.js';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FALLBACK = { USD: 1, CAD: 1.37, EUR: 0.92, GBP: 0.79 };
+
+// Shared across fx instances: after a failed fetch, don't retry for a
+// minute — a check run must never stall on rates (they're display-only).
+let lastFailedFetchAt = 0;
 
 export function createFx(q) {
   let rates = null;
@@ -25,8 +31,13 @@ export function createFx(q) {
   async function ensureRates() {
     if (!rates) loadCached();
     if (rates && Date.now() - loadedAt < DAY_MS) return;
+    if (Date.now() - lastFailedFetchAt < 60_000) {
+      if (!rates) rates = { ...FALLBACK };
+      return;
+    }
     try {
-      const res = await fetch('https://api.frankfurter.dev/v1/latest?base=USD');
+      // Hard 5s cap: a stalled connection here must not hang the whole run.
+      const res = await fetchWithTimeout('https://api.frankfurter.dev/v1/latest?base=USD', { timeoutMs: 5000 });
       if (res.ok) {
         const body = await res.json();
         if (body?.rates) {
@@ -39,6 +50,7 @@ export function createFx(q) {
     } catch {
       // offline / API down — stale cache (or fallback below) is fine for display
     }
+    lastFailedFetchAt = Date.now();
     if (!rates) rates = { ...FALLBACK };
   }
 

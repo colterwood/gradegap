@@ -24,6 +24,9 @@ async function waitUntilDone(mgr, timeoutMs = 20000) {
 async function freshWatched({ maxPrice = null, company = 'SGC', grade = '10' } = {}) {
   const db = openDb(':memory:');
   const q = makeQueries(db);
+  // Pre-seed the FX cache so ensureRates() never touches the network — the
+  // tests must be hermetic (and CAD assertions deterministic at 1.37/USD).
+  q.kvSet.run('fx:usd', JSON.stringify({ USD: 1, CAD: 1.37, EUR: 0.92, GBP: 0.79 }));
   const syncManager = createSyncManager(db, q);
   await syncManager.start({});
   await waitUntilDone(syncManager);
