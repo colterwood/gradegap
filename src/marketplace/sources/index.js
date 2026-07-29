@@ -13,9 +13,14 @@
 
 import { config } from '../../config.js';
 
-const REGISTRY = {
+// Exported for scripts/testSource.js, which lets you exercise any single
+// adapter from the CLI regardless of WATCH_SOURCES.
+export const REGISTRY = {
   ebay: async () => (await import('./ebay.js')).createEbaySource(),
   shopify: async () => (await import('./shopify.js')).createShopifySource(),
+  fanatics: async () => (await import('./fanatics.js')).createFanaticsSource(),
+  goldin: async () => (await import('./goldin.js')).createGoldinSource(),
+  pristine: async () => (await import('./pristine.js')).createPristineSource(),
 };
 
 export async function createMarketplaceSources() {

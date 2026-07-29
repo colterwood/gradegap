@@ -12,6 +12,7 @@
     "mock": "node src/server.js --mock",
     "login": "node scripts/login.js",
     "discover": "node scripts/discover.js",
+    "test-source": "node scripts/testSource.js",
     "test": "node --test"
   },
   "dependencies": {
