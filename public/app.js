@@ -1,14 +1,25 @@
 const state = {
   basis: 'cl_value',
-  sort: 'pct',
   direction: 'all',
   minPrice: 0,
   playerId: '',
+  sortColumn: 'pct_diff', // default: biggest % gaps first
+  sortDir: 'desc',
+  colors: { green: true, yellow: true, red: true },
 };
+
+// The current, unsorted result set (fetched once per server-side filter change).
+let currentRows = [];
 
 const $ = (id) => document.getElementById(id);
 const fmtMoney = (n) =>
   n == null ? '—' : n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+
+// Card Ladder dates arrive as ISO (2026-05-06T10:00:00.000Z); show just the day.
+const fmtDate = (s) => (s ? String(s).slice(0, 10) : '—');
+
+// Severity order for sorting the color column: green < yellow < red.
+const COLOR_RANK = { green: 0, yellow: 1, red: 2 };
 
 // --- recency dot -----------------------------------------------------------
 // Months since a YYYY-MM-DD last-sale date; a missing date = never sold.
@@ -59,45 +70,99 @@ async function api(path, opts) {
 
 // --- results ---------------------------------------------------------------
 
+// Fetch the full comparable set for the current server-side filters (basis,
+// direction, min price, player). Sorting and color filtering happen client-side.
 async function loadResults() {
   const params = new URLSearchParams({
     basis: state.basis,
-    sort: state.sort,
     direction: state.direction,
     minPrice: state.minPrice,
+    limit: 5000,
   });
   if (state.playerId) params.set('playerId', state.playerId);
 
   const data = await api(`/api/results?${params}`);
+  currentRows = data.rows.map((row) => ({ ...row, _dot: recencyDot(row) }));
+  lastMeta = { total: data.total, excluded: data.excludedMissingGrade };
+  renderResults();
+}
+
+let lastMeta = { total: 0, excluded: 0 };
+
+function sortValue(row, column) {
+  switch (column) {
+    case 'color': return COLOR_RANK[row._dot.color];
+    case 'name': return (row.name || '').toLowerCase();
+    case 'sgc_last_sale_date':
+    case 'psa_last_sale_date': return row[column] || ''; // ISO strings sort lexically; '' (never) sorts first asc / handled below
+    default: return row[column]; // numeric columns
+  }
+}
+
+function renderResults() {
+  const active = new Set(Object.entries(state.colors).filter(([, v]) => v).map(([k]) => k));
+  const rows = currentRows.filter((r) => active.has(r._dot.color));
+
+  const col = state.sortColumn;
+  const dir = state.sortDir === 'asc' ? 1 : -1;
+  const isDate = col === 'sgc_last_sale_date' || col === 'psa_last_sale_date';
+  rows.sort((a, b) => {
+    let av = sortValue(a, col);
+    let bv = sortValue(b, col);
+    // push nulls/never-sold to the bottom regardless of direction
+    const aNull = av === null || av === undefined || (isDate && av === '');
+    const bNull = bv === null || bv === undefined || (isDate && bv === '');
+    if (aNull && bNull) return 0;
+    if (aNull) return 1;
+    if (bNull) return -1;
+    if (typeof av === 'string') return av.localeCompare(bv) * dir;
+    return (av - bv) * dir;
+  });
+
   const tbody = document.querySelector('#results tbody');
   tbody.innerHTML = '';
-
-  for (const row of data.rows) {
+  for (const row of rows) {
     const tr = document.createElement('tr');
     const diffClass = row.abs_diff >= 0 ? 'pos' : 'neg';
     const link = row.cl_url
       ? `<a href="${row.cl_url}" target="_blank" rel="noopener">${row.name}</a>`
       : row.name;
-    const dot = recencyDot(row);
     tr.innerHTML = `
-      <td class="dot-cell"><span class="dot dot-${dot.color}" title="${dot.title}"></span></td>
+      <td class="dot-cell"><span class="dot dot-${row._dot.color}" title="${row._dot.title}"></span></td>
       <td>${link}</td>
       <td class="num">${fmtMoney(row.sgc_price)}</td>
       <td class="num">${fmtMoney(row.psa_price)}</td>
       <td class="num ${diffClass}">${row.abs_diff >= 0 ? '+' : ''}${fmtMoney(row.abs_diff)}</td>
       <td class="num ${diffClass}">${row.pct_diff >= 0 ? '+' : ''}${row.pct_diff}%</td>
-      <td class="date">${row.sgc_last_sale_date ?? '—'}</td>
-      <td class="date">${row.psa_last_sale_date ?? '—'}</td>
+      <td class="date">${fmtDate(row.sgc_last_sale_date)}</td>
+      <td class="date">${fmtDate(row.psa_last_sale_date)}</td>
     `;
     tbody.appendChild(tr);
   }
 
-  $('results').hidden = data.rows.length === 0;
-  $('empty').hidden = data.rows.length > 0;
+  $('results').hidden = rows.length === 0;
+  $('empty').hidden = rows.length > 0 || currentRows.length === 0;
 
-  const bits = [`${data.total} card${data.total === 1 ? '' : 's'} with both grades`];
-  if (data.excludedMissingGrade > 0) bits.push(`${data.excludedMissingGrade} skipped (missing a grade on this basis)`);
+  updateSortArrows();
+
+  const bits = [];
+  if (rows.length !== lastMeta.total) bits.push(`${rows.length} of ${lastMeta.total} cards`);
+  else bits.push(`${lastMeta.total} card${lastMeta.total === 1 ? '' : 's'} with both grades`);
+  if (lastMeta.excluded > 0) bits.push(`${lastMeta.excluded} skipped (missing a grade on this basis)`);
   $('summary').textContent = bits.join(' · ');
+}
+
+function updateSortArrows() {
+  for (const th of document.querySelectorAll('#results th.sortable')) {
+    const arrow = th.querySelector('.arrow');
+    if (th.dataset.col === state.sortColumn) {
+      th.classList.add('sorted');
+      arrow.textContent = state.sortDir === 'asc' ? ' ▲' : ' ▼';
+    } else {
+      th.classList.remove('sorted');
+      arrow.textContent = '';
+    }
+  }
 }
 
 // --- sync ------------------------------------------------------------------
@@ -197,7 +262,29 @@ function wireToggle(id, key) {
 }
 
 wireToggle('basis-toggle', 'basis');
-wireToggle('sort-toggle', 'sort');
+
+// Click a column header to sort by it; first click ascending, click again to
+// flip to descending. (Color column ascending = green→yellow→red.)
+for (const th of document.querySelectorAll('#results th.sortable')) {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (state.sortColumn === col) {
+      state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      state.sortColumn = col;
+      state.sortDir = 'asc';
+    }
+    renderResults();
+  });
+}
+
+// Recency color filter checkboxes.
+$('color-filter').addEventListener('change', (e) => {
+  const cb = e.target.closest('input[type="checkbox"]');
+  if (!cb) return;
+  state.colors[cb.dataset.color] = cb.checked;
+  renderResults();
+});
 
 $('direction').addEventListener('change', (e) => {
   state.direction = e.target.value;

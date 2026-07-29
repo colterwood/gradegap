@@ -37,10 +37,11 @@
       </div>
     </div>
     <div class="control">
-      <label>Sort by</label>
-      <div class="toggle" id="sort-toggle">
-        <button data-value="pct" class="active">% Diff</button>
-        <button data-value="abs">$ Diff</button>
+      <label>Recency</label>
+      <div class="checks" id="color-filter">
+        <label><input type="checkbox" data-color="green" checked /> <i class="dot dot-green"></i> Green</label>
+        <label><input type="checkbox" data-color="yellow" checked /> <i class="dot dot-yellow"></i> Yellow</label>
+        <label><input type="checkbox" data-color="red" checked /> <i class="dot dot-red"></i> Red</label>
       </div>
     </div>
     <div class="control">
@@ -73,14 +74,14 @@
     <table id="results">
       <thead>
         <tr>
-          <th class="dot-col" title="Recency of the last sale"></th>
-          <th>Card</th>
-          <th class="num">SGC 10 GM</th>
-          <th class="num">PSA 10</th>
-          <th class="num">$ Diff</th>
-          <th class="num">% Diff</th>
-          <th>SGC last sale</th>
-          <th>PSA last sale</th>
+          <th class="dot-col sortable" data-col="color" data-type="color" title="Recency of the last sale — click to sort"><span class="hcell"><span class="arrow"></span></span></th>
+          <th class="sortable" data-col="name" data-type="text"><span class="hcell">Card<span class="arrow"></span></span></th>
+          <th class="num sortable" data-col="sgc_price" data-type="num"><span class="hcell">SGC 10 GM<span class="arrow"></span></span></th>
+          <th class="num sortable" data-col="psa_price" data-type="num"><span class="hcell">PSA 10<span class="arrow"></span></span></th>
+          <th class="num sortable" data-col="abs_diff" data-type="num"><span class="hcell">$ Diff<span class="arrow"></span></span></th>
+          <th class="num sortable" data-col="pct_diff" data-type="num"><span class="hcell">% Diff<span class="arrow"></span></span></th>
+          <th class="sortable" data-col="sgc_last_sale_date" data-type="date"><span class="hcell">SGC last sale<span class="arrow"></span></span></th>
+          <th class="sortable" data-col="psa_last_sale_date" data-type="date"><span class="hcell">PSA last sale<span class="arrow"></span></span></th>
         </tr>
       </thead>
       <tbody></tbody>
