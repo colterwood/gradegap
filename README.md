@@ -118,17 +118,24 @@ scorers are highlighted so *you* make the final call (Dismiss clears them).
   auctions enter their last `WATCH_REMIND_MIN` minutes (default 24h).
 - **Sources** (`WATCH_SOURCES`): each marketplace is a small adapter under
   `src/marketplace/sources/`. Shipping today:
-  - `ebay` — the official eBay Browse API (no scraping) across the US,
-    Canadian, UK, German, French, and Italian marketplaces
-    (`EBAY_MARKETPLACES`). Needs a free developer keyset — see
-    `.env.example`.
-  - `shopify` — a generic adapter for any Shopify card shop's public search
-    (built for the Canadian shops: Flip Collectibles, Mintink, Overtime, …);
-    list domains in `SHOPIFY_SHOPS`.
-  - More (Goldin, Heritage, Fanatics Collect, Pristine, CIA, COMC, MySlabs,
-    HiBid, Catawiki, …) slot in behind the same interface — the plan lives in
-    the repo history; each one is a single new file in
-    `src/marketplace/sources/` plus a `WATCH_SOURCES` entry.
+  - **No browser needed**: `ebay` (official Browse API across the US/CA/UK/
+    DE/FR/IT marketplaces — needs a free developer keyset, see
+    `.env.example`), `fanatics` (Fanatics Collect / ex-PWCC), `comc`,
+    `goldin`, `cia` (Collector Investor Auctions), `classic` (Classic
+    Auctions, Montreal), `miller` (Miller & Miller, Ontario), and `shopify`
+    — a generic adapter for any Shopify card shop's public search (Flip
+    Collectibles, Mintink, Overtime, also Graded Auction UK; list domains
+    in `SHOPIFY_SHOPS`).
+  - **Browser-based** (these open the same visible Chromium the Sync uses,
+    because the sites block plain clients): `hibid` (HiBid Canada
+    aggregator — dozens of Canadian houses in one source), `heritage`,
+    `myslabs`, `pristine`, `catawiki` (EU).
+  - **Verify before enabling**: scraped sites weren't reachable from the
+    development environment, so each scraped adapter is best-effort until
+    proven against the live site *from your machine*:
+    `npm run test-source -- fanatics "jordan psa 10"`. A broken source
+    never takes down a check — it's marked failed for that run and the
+    rest continue. Currencies are handled per source (CAD/EUR/GBP → USD).
 - **Per-watch cap**: the Watched tab's *Max $* column skips new listings
   above a USD price; the *On* toggle pauses a watch without losing its
   listing history; ✕ deletes the watch and its history (unticking the Watch
@@ -174,9 +181,13 @@ src/marketplace/   the watcher: match.js (query building + title scoring),
 public/            the web UI (no build step)
 ```
 
-## A note on Card Ladder's terms
+## A note on terms of service
 
-This tool automates a logged-in browser against your own paid account, at
-human-like speeds, for personal research. That said, automated access likely
-sits outside Card Ladder's terms of service — use at your own discretion and
-keep the rate limits polite.
+This tool automates a logged-in browser against your own paid Card Ladder
+account, at human-like speeds, for personal research. The marketplace
+watcher likewise polls public search pages/APIs at low, jittered rates for
+personal purchase alerts. That said, automated access likely sits outside
+several of these sites' terms of service (eBay's official API and the
+Shopify search endpoints are the exceptions) — use at your own discretion,
+keep the check interval modest, and disable any source whose operator
+objects.

@@ -21,6 +21,14 @@ export const REGISTRY = {
   fanatics: async () => (await import('./fanatics.js')).createFanaticsSource(),
   goldin: async () => (await import('./goldin.js')).createGoldinSource(),
   pristine: async () => (await import('./pristine.js')).createPristineSource(),
+  comc: async () => (await import('./comc.js')).createComcSource(),
+  heritage: async () => (await import('./heritage.js')).createHeritageSource(),
+  myslabs: async () => (await import('./myslabs.js')).createMySlabsSource(),
+  hibid: async () => (await import('./hibid.js')).createHibidSource(),
+  cia: async () => (await import('./cia.js')).createCiaSource(),
+  classic: async () => (await import('./classic.js')).createClassicSource(),
+  catawiki: async () => (await import('./catawiki.js')).createCatawikiSource(),
+  miller: async () => (await import('./miller.js')).createMillerSource(),
 };
 
 export async function createMarketplaceSources() {
