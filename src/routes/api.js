@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { COMPARE_GRADES } from '../config.js';
 
 export function makeApiRouter(db, q, syncManager) {
   const router = Router();
@@ -36,10 +37,10 @@ export function makeApiRouter(db, q, syncManager) {
       : 'all';
     const minPrice = Math.max(0, parseFloat(req.query.minPrice) || 0);
     const minDiff = Math.max(0, parseFloat(req.query.minDiff) || 0);
-    // grades: comma-separated subset of 10,9. Absent -> default to 10 only.
+    // grades: comma-separated subset of COMPARE_GRADES. Absent -> default to 10 only.
     const grades = req.query.grades === undefined
       ? undefined
-      : String(req.query.grades).split(',').map((s) => s.trim()).filter((g) => g === '10' || g === '9');
+      : String(req.query.grades).split(',').map((s) => s.trim()).filter((g) => COMPARE_GRADES.includes(g));
     const playerId = parseInt(req.query.playerId, 10) || null;
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 5000);
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);

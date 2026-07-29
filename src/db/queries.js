@@ -1,6 +1,6 @@
 // All prepared statements live here. Parsers and routes never build SQL.
 
-import { TARGETS } from '../config.js';
+import { COMPARE_GRADES, TARGETS } from '../config.js';
 
 export function makeQueries(db) {
   const upsertCard = db.prepare(`
@@ -38,6 +38,10 @@ export function makeQueries(db) {
 
   const getCardByClId = db.prepare(`SELECT * FROM cards WHERE cl_card_id = ?`);
 
+  // Which (grader, grade) combinations have any synced rows — drives the
+  // "no grade N data synced yet" hint in resultsQuery.
+  const listGradePresence = db.prepare(`SELECT DISTINCT grading_company, grade FROM grade_prices`);
+
   // --- disparity ---------------------------------------------------------
   // basis: 'cl_value' | 'last_sale' ; both grades must have a non-null value
   // on the chosen basis to be comparable.
@@ -50,10 +54,19 @@ export function makeQueries(db) {
     const sortCol = sort === 'abs' ? 'abs_diff' : 'pct_diff';
 
     // Only the grades we actually crawl are valid; anything else is dropped.
-    const gradeList = (grades === undefined ? ['10'] : grades).filter((g) => g === '10' || g === '9');
+    const gradeList = (grades === undefined ? ['10'] : grades).filter((g) => COMPARE_GRADES.includes(g));
     if (gradeList.length === 0) {
-      return { rows: [], total: 0, excludedMissingGrade: 0 };
+      return { rows: [], total: 0, excludedMissingGrade: 0, missingGrades: [] };
     }
+
+    // A requested grade with no synced rows on BOTH sides (a DB from before
+    // that grade was crawled, or a sync cancelled between the SGC and PSA
+    // passes) can never produce a pair — report it so the UI can say
+    // "run Sync" instead of showing a silently empty table.
+    const present = new Set(listGradePresence.all().map((r) => `${r.grading_company}|${r.grade}`));
+    const missingGrades = gradeList.filter(
+      (g) => !present.has(`${TARGETS.sgc.company}|${g}`) || !present.has(`${TARGETS.psa.company}|${g}`)
+    );
 
     let where = '1=1';
     if (direction === 'sgc_cheaper') where = 'd.abs_diff > 0';
@@ -130,6 +143,7 @@ ${gradeList.map(pairSelect).join('\n        UNION ALL\n')}
       rows,
       total: totals.total,
       excludedMissingGrade: totals.all_cards - totals.comparable_cards,
+      missingGrades,
     };
   }
 

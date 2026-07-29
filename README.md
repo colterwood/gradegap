@@ -26,8 +26,8 @@ in via `.env`) and never leaves your computer.
   the results page is instant and works offline.
 - The table ranks cards by disparity — toggleable between **% difference**
   and **$ difference**, between **CL Value** and **Last Sale** price basis,
-  and filterable by grade (10 / 9), recency, minimum SGC price, minimum dollar
-  gap (**Min $ Diff**), and player. A **Grade** column shows which comparison a
+  and filterable by grade (10 / 9), liquidity (last-sale recency), minimum SGC
+  price, minimum dollar gap (**Min $ Diff**), and player. A **Grade** column shows which comparison a
   row came from, and **SGC / PSA Sales No** columns show each side's Number of
   Sales. Every row links to the card's page on Card Ladder.
 

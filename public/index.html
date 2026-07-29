@@ -39,12 +39,12 @@
     <div class="control">
       <label>Grade</label>
       <div class="checks" id="grade-filter">
-        <label><input type="checkbox" data-grade="10" checked /> 10 <span class="hint">SGC 10 vs PSA 10</span></label>
-        <label><input type="checkbox" data-grade="9" checked /> 9 <span class="hint">SGC 9 vs PSA 9</span></label>
+        <label><input type="checkbox" data-grade="10" checked /> 10</label>
+        <label><input type="checkbox" data-grade="9" checked /> 9</label>
       </div>
     </div>
     <div class="control">
-      <label>Recency</label>
+      <label>Liquidity</label>
       <div class="checks" id="color-filter">
         <label><input type="checkbox" data-color="green" checked /> <i class="dot dot-green"></i> Green</label>
         <label><input type="checkbox" data-color="yellow" checked /> <i class="dot dot-yellow"></i> Yellow</label>
@@ -85,7 +85,7 @@
     <table id="results">
       <thead>
         <tr>
-          <th class="dot-col sortable" data-col="color" data-type="color" title="Recency of the last sale — click to sort"><span class="hcell"><span class="arrow"></span></span></th>
+          <th class="dot-col sortable" data-col="color" data-type="color" title="Liquidity — how recently each side last sold — click to sort"><span class="hcell"><span class="arrow"></span></span></th>
           <th class="sortable" data-col="name" data-type="text"><span class="hcell">Card<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="grade" data-type="num"><span class="hcell">Grade<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="sgc_price" data-type="num"><span class="hcell">SGC<span class="arrow"></span></span></th>
@@ -100,7 +100,8 @@
       </thead>
       <tbody></tbody>
     </table>
-    <p id="empty" class="empty" hidden>No results yet — hit <strong>Sync</strong> to pull data from Card Ladder.</p>
+    <!-- Message text is owned by renderResults() in app.js. -->
+    <p id="empty" class="empty" hidden></p>
   </main>
 
   <script src="app.js"></script>

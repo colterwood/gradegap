@@ -18,6 +18,11 @@ const $ = (id) => document.getElementById(id);
 const fmtMoney = (n) =>
   n == null ? '—' : n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
+// Card names and URLs come from scraped Card Ladder data — escape them before
+// they go through innerHTML.
+const esc = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 // Card Ladder dates arrive as ISO (2026-05-06T10:00:00.000Z); show just the day.
 const fmtDate = (s) => (s ? String(s).slice(0, 10) : '—');
 
@@ -79,7 +84,7 @@ async function loadResults() {
   // No grade selected -> nothing to compare; clear the table without a fetch.
   if (grades.length === 0) {
     currentRows = [];
-    lastMeta = { total: 0, excluded: 0 };
+    lastMeta = { total: 0, excluded: 0, missing: [] };
     renderResults();
     return;
   }
@@ -96,11 +101,11 @@ async function loadResults() {
 
   const data = await api(`/api/results?${params}`);
   currentRows = data.rows.map((row) => ({ ...row, _dot: recencyDot(row) }));
-  lastMeta = { total: data.total, excluded: data.excludedMissingGrade };
+  lastMeta = { total: data.total, excluded: data.excludedMissingGrade, missing: data.missingGrades ?? [] };
   renderResults();
 }
 
-let lastMeta = { total: 0, excluded: 0 };
+let lastMeta = { total: 0, excluded: 0, missing: [] };
 
 function sortValue(row, column) {
   switch (column) {
@@ -139,8 +144,8 @@ function renderResults() {
     const tr = document.createElement('tr');
     const diffClass = row.abs_diff >= 0 ? 'pos' : 'neg';
     const link = row.cl_url
-      ? `<a href="${row.cl_url}" target="_blank" rel="noopener">${row.name}</a>`
-      : row.name;
+      ? `<a href="${esc(row.cl_url)}" target="_blank" rel="noopener">${esc(row.name)}</a>`
+      : esc(row.name);
     tr.innerHTML = `
       <td class="dot-cell"><span class="dot dot-${row._dot.color}" title="${row._dot.title}"></span></td>
       <td>${link}</td>
@@ -158,7 +163,19 @@ function renderResults() {
   }
 
   $('results').hidden = rows.length === 0;
-  $('empty').hidden = rows.length > 0 || currentRows.length === 0;
+  const emptyEl = $('empty');
+  emptyEl.hidden = rows.length > 0;
+  if (rows.length === 0) {
+    if (!Object.values(state.grades).some(Boolean)) {
+      emptyEl.textContent = 'Select a grade to compare.';
+    } else if (currentRows.length > 0) {
+      emptyEl.textContent = 'All rows are hidden by the current Liquidity filter.';
+    } else if (lastMeta.missing.length > 0) {
+      emptyEl.innerHTML = `No grade ${lastMeta.missing.join(' or ')} data synced yet — hit <strong>Sync</strong> to pull it.`;
+    } else {
+      emptyEl.innerHTML = 'No matching cards — hit <strong>Sync</strong> to pull data from Card Ladder, or loosen the filters.';
+    }
+  }
 
   updateSortArrows();
 
@@ -166,6 +183,7 @@ function renderResults() {
   if (rows.length !== lastMeta.total) bits.push(`${rows.length} of ${lastMeta.total} cards`);
   else bits.push(`${lastMeta.total} card${lastMeta.total === 1 ? '' : 's'} with both grades`);
   if (lastMeta.excluded > 0) bits.push(`${lastMeta.excluded} skipped (missing a grade on this basis)`);
+  for (const g of lastMeta.missing) bits.push(`no grade ${g} data synced yet — run Sync to pull it`);
   $('summary').textContent = bits.join(' · ');
 }
 
@@ -295,7 +313,7 @@ for (const th of document.querySelectorAll('#results th.sortable')) {
   });
 }
 
-// Recency color filter checkboxes (client-side only).
+// Liquidity color filter checkboxes (client-side only).
 $('color-filter').addEventListener('change', (e) => {
   const cb = e.target.closest('input[type="checkbox"]');
   if (!cb) return;
