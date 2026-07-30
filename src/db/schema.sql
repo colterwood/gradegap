@@ -113,6 +113,12 @@ CREATE TABLE IF NOT EXISTS listings (
   status         TEXT NOT NULL DEFAULT 'new'
                  CHECK (status IN ('new','notified')),
   reminder_sent  INTEGER NOT NULL DEFAULT 0,
+  -- The Following tab: listings the user explicitly tagged. Followed
+  -- auctions get their own per-item ending-soon alert (ntfy + email,
+  -- follow_reminder_sent dedupes it) and followed Buy It Nows alert on any
+  -- price decrease; both are excluded from the generic aggregate reminder.
+  followed              INTEGER NOT NULL DEFAULT 0,
+  follow_reminder_sent  INTEGER NOT NULL DEFAULT 0,
   misses         INTEGER NOT NULL DEFAULT 0,
   found_at       TEXT NOT NULL DEFAULT (datetime('now')),
   last_seen_at   TEXT NOT NULL DEFAULT (datetime('now')),

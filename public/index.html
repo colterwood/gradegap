@@ -32,6 +32,7 @@
     <button class="tab active" data-view="disparity">Disparity</button>
     <button class="tab" data-view="watched">Watched</button>
     <button class="tab" data-view="listings">Listings <span id="watched-badge" class="badge" hidden></span></button>
+    <button class="tab" data-view="following">Following</button>
   </nav>
 
   <div id="view-disparity">
@@ -191,10 +192,44 @@
       <div class="summary-row matches-head">
         <p class="summary" id="matches-summary"></p>
         <span class="listing-filters">
+          <input type="text" id="listing-search" class="table-search" placeholder="Search listings…"
+                 title="Show only rows whose listing title, watched card, or site contains every word typed" />
           <label class="show-ended"><input type="checkbox" id="hide-low" checked /> Hide low-confidence (&lt;50%)</label>
         </span>
       </div>
       <table id="matches-table">
+        <thead>
+          <tr>
+            <th class="watch-col sortable" data-col="followed" title="Follow this listing: it appears on the Following tab and gets its own alerts — 24h-left for auctions, price drops for Buy It Nows — click to sort followed first"><span class="hcell">Follow<span class="arrow"></span></span></th>
+            <th class="dot-col sortable" data-col="deal" title="Deal — red: price above CL value; green: below CL, Buy It Now; yellow: below CL, auction — click to sort"><span class="hcell"><span class="arrow"></span></span></th>
+            <th class="sortable" data-col="source"><span class="hcell">Site<span class="arrow"></span></span></th>
+            <th class="sortable" data-col="title"><span class="hcell">Listing<span class="arrow"></span></span></th>
+            <th class="sortable" data-col="card_name"><span class="hcell">Watched card<span class="arrow"></span></span></th>
+            <th class="num sortable" data-col="price_usd"><span class="hcell">Price (USD)<span class="arrow"></span></span></th>
+            <th class="num sortable" data-col="cl_value" title="Card Ladder value for that card at the watched grade"><span class="hcell">CL Value<span class="arrow"></span></span></th>
+            <th class="num sortable" data-col="psa_value" title="Card Ladder PSA value at the SAME grade as the watched card — an SGC 9 watch shows PSA 9, not PSA 10"><span class="hcell">PSA<span class="arrow"></span></span></th>
+            <th class="sortable" data-col="listing_type"><span class="hcell">Type<span class="arrow"></span></span></th>
+            <th class="sortable" data-col="ends_at" title="Auction end time (UTC) and time remaining"><span class="hcell">Ends<span class="arrow"></span></span></th>
+            <th class="num sortable" data-col="match_score" title="How closely the listing title matches the card"><span class="hcell">Match<span class="arrow"></span></span></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="matches-empty" class="empty" hidden></p>
+    </main>
+  </div>
+
+  <div id="view-following" hidden>
+    <main>
+      <div class="summary-row matches-head">
+        <p class="summary" id="following-summary"></p>
+        <span class="listing-filters">
+          <input type="text" id="following-search" class="table-search" placeholder="Search followed…"
+                 title="Show only rows whose listing title, watched card, or site contains every word typed" />
+        </span>
+      </div>
+      <table id="following-table">
         <thead>
           <tr>
             <th class="dot-col sortable" data-col="deal" title="Deal — red: price above CL value; green: below CL, Buy It Now; yellow: below CL, auction — click to sort"><span class="hcell"><span class="arrow"></span></span></th>
@@ -212,7 +247,7 @@
         </thead>
         <tbody></tbody>
       </table>
-      <p id="matches-empty" class="empty" hidden></p>
+      <p id="following-empty" class="empty" hidden></p>
     </main>
   </div>
 

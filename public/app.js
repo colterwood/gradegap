@@ -478,10 +478,22 @@ let currentView = 'disparity';
 let checkPollTimer = null;
 let checkWasRunning = false;
 
-// Listings-tab sort state + the last-fetched rows (so header clicks re-sort
-// without refetching). col null = the server's newest-first order.
-let listingSort = { col: null, dir: 'asc' };
-let currentMatches = [];
+// The two listing tables (Listings = everything, Following = tagged rows)
+// share one renderer; each keeps its own rows, sort, and search so flipping
+// tabs never clobbers the other's view state. sort.col null = the server's
+// newest-first order.
+const listingViews = {
+  listings: {
+    rows: [], sort: { col: null, dir: 'asc' }, search: '',
+    tableId: 'matches-table', summaryId: 'matches-summary', emptyId: 'matches-empty',
+    emptyText: 'No listings matched yet — hit Check now, or wait for the next scheduled check.',
+  },
+  following: {
+    rows: [], sort: { col: null, dir: 'asc' }, search: '',
+    tableId: 'following-table', summaryId: 'following-summary', emptyId: 'following-empty',
+    emptyText: 'Not following anything yet — tick the Follow box on a row in the Listings tab.',
+  },
+};
 
 async function loadWatches() {
   const watches = await api('/api/watches');
@@ -529,8 +541,10 @@ function switchView(view) {
   $('view-disparity').hidden = view !== 'disparity';
   $('view-watched').hidden = view !== 'watched';
   $('view-listings').hidden = view !== 'listings';
+  $('view-following').hidden = view !== 'following';
   if (view === 'watched') loadWatchedView().catch((err) => setError(err.message));
   if (view === 'listings') loadListingsView().catch((err) => setError(err.message));
+  if (view === 'following') loadFollowingView().catch((err) => setError(err.message));
 }
 
 document.querySelector('.tabs').addEventListener('click', (e) => {
@@ -605,6 +619,7 @@ function dealDot(m) {
 function matchSortValue(m, col) {
   switch (col) {
     case 'deal': return m._deal.rank;
+    case 'followed': return m.followed ? 1 : 0;
     case 'price_usd': return m.price_usd ?? m.price;
     case 'ends_at': return m.listing_type === 'auction' ? m.ends_at || null : null; // SQL dates sort lexically
     case 'source': case 'listing_type': return m[col] || '';
@@ -614,20 +629,36 @@ function matchSortValue(m, col) {
   }
 }
 
-function renderMatches(all) {
+// One renderer for both listing tables. viewKey selects the per-view state
+// in listingViews; the two tables differ only in their first and last
+// columns (Listings: Follow checkbox + Dismiss; Following: Unfollow).
+function renderMatches(viewKey) {
+  const view = listingViews[viewKey];
+  const all = view.rows;
   for (const m of all) m._deal = dealDot(m);
+
   // "Hide low-confidence" hides sub-50% scores from view (they stay in the
-  // DB and reappear if unchecked). Ended/dismissed listings never reach here
-  // at all — they're deleted server-side the moment they're confirmed gone.
-  const matches = $('hide-low').checked
+  // DB and reappear if unchecked) — Listings only: the Following tab is a
+  // hand-curated list, nothing there should be hidden. Ended/dismissed
+  // listings never reach here at all — they're deleted server-side the
+  // moment they're confirmed gone.
+  let matches = viewKey === 'listings' && $('hide-low').checked
     ? all.filter((m) => m.match_score == null || m.match_score >= 0.5)
     : [...all];
 
-  if (listingSort.col) {
-    const dir = listingSort.dir === 'asc' ? 1 : -1;
+  const terms = view.search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length > 0) {
+    matches = matches.filter((m) => {
+      const hay = `${m.title ?? ''} ${watchLabel(m)} ${m.source ?? ''}`.toLowerCase();
+      return terms.every((t) => hay.includes(t));
+    });
+  }
+
+  if (view.sort.col) {
+    const dir = view.sort.dir === 'asc' ? 1 : -1;
     matches.sort((a, b) => {
-      const av = matchSortValue(a, listingSort.col);
-      const bv = matchSortValue(b, listingSort.col);
+      const av = matchSortValue(a, view.sort.col);
+      const bv = matchSortValue(b, view.sort.col);
       // nulls (no price, no end time, no CL value) go to the bottom either way
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
@@ -637,7 +668,7 @@ function renderMatches(all) {
     });
   }
 
-  const tbody = document.querySelector('#matches-table tbody');
+  const tbody = document.querySelector(`#${view.tableId} tbody`);
   tbody.innerHTML = '';
   for (const m of matches) {
     const tr = document.createElement('tr');
@@ -649,7 +680,15 @@ function renderMatches(all) {
     const ends = m.listing_type === 'auction' && m.ends_at
       ? `<span class="date">${esc(m.ends_at)}</span><br /><span class="time-left">${fmtTimeLeft(m.ends_at)}</span>`
       : '—';
+    const followCell = viewKey === 'listings'
+      ? `<td class="watch-cell"><input type="checkbox" class="follow-cb" data-id="${m.id}" ${m.followed ? 'checked' : ''}
+           title="Follow: 24h-left and price-drop alerts, and a row on the Following tab" /></td>`
+      : '';
+    const actionCell = viewKey === 'listings'
+      ? `<td><button class="link-btn match-dismiss" data-id="${m.id}">Dismiss</button></td>`
+      : `<td><button class="link-btn match-unfollow" data-id="${m.id}">Unfollow</button></td>`;
     tr.innerHTML = `
+      ${followCell}
       <td class="dot-cell"><span class="dot dot-${m._deal.color}" title="${esc(m._deal.title)}"></span></td>
       <td><span class="source-badge">${esc(m.source)}</span></td>
       <td class="listing-title">${title}${m.seller ? `<div class="seller">${esc(m.seller)}</div>` : ''}</td>
@@ -660,21 +699,22 @@ function renderMatches(all) {
       <td>${m.listing_type === 'auction' ? 'Auction' : 'Buy It Now'}</td>
       <td>${ends}</td>
       <td class="num">${low ? `<span class="score-low" title="Low-confidence match — verify before trusting">${score}</span>` : score}</td>
-      <td><button class="link-btn match-dismiss" data-id="${m.id}">Dismiss</button></td>
+      ${actionCell}
     `;
     tbody.appendChild(tr);
   }
 
-  updateSortArrows('matches-table', listingSort.col, listingSort.dir);
-  $('matches-table').hidden = matches.length === 0;
-  const empty = $('matches-empty');
+  updateSortArrows(view.tableId, view.sort.col, view.sort.dir);
+  $(view.tableId).hidden = matches.length === 0;
+  const empty = $(view.emptyId);
   empty.hidden = matches.length > 0;
   if (matches.length === 0) {
-    empty.textContent = 'No listings matched yet — hit Check now, or wait for the next scheduled check.';
+    empty.textContent = all.length > 0 ? 'No rows match the search.' : view.emptyText;
   }
   const hidden = all.length - matches.length;
-  $('matches-summary').textContent = `${matches.length} live listing${matches.length === 1 ? '' : 's'}` +
-    (hidden > 0 ? ` · ${hidden} low-confidence hidden` : '');
+  const noun = viewKey === 'following' ? 'followed listing' : 'live listing';
+  $(view.summaryId).textContent = `${matches.length} ${noun}${matches.length === 1 ? '' : 's'}` +
+    (hidden > 0 ? ` · ${hidden} hidden (low-confidence or search)` : '');
 }
 
 async function loadWatchedView() {
@@ -745,22 +785,32 @@ $('add-watch').addEventListener('submit', async (e) => {
 });
 
 async function loadListingsView() {
-  currentMatches = await api('/api/matches?status=new,notified');
-  renderMatches(currentMatches);
+  listingViews.listings.rows = await api('/api/matches?status=new,notified');
+  renderMatches('listings');
   await refreshWatchBadge();
 }
 
-// Click a Listings column header to sort, same behavior as the disparity table.
-for (const th of document.querySelectorAll('#matches-table th.sortable')) {
-  th.addEventListener('click', () => {
-    const col = th.dataset.col;
-    if (listingSort.col === col) {
-      listingSort.dir = listingSort.dir === 'asc' ? 'desc' : 'asc';
-    } else {
-      listingSort = { col, dir: 'asc' };
-    }
-    renderMatches(currentMatches);
-  });
+async function loadFollowingView() {
+  listingViews.following.rows = await api('/api/matches?status=new,notified&followed=1');
+  renderMatches('following');
+}
+
+// Click a column header to sort, same behavior as the disparity table —
+// wired for both listing tables, each against its own sort state.
+for (const [viewKey, tableId] of [['listings', 'matches-table'], ['following', 'following-table']]) {
+  for (const th of document.querySelectorAll(`#${tableId} th.sortable`)) {
+    th.addEventListener('click', () => {
+      const sort = listingViews[viewKey].sort;
+      const col = th.dataset.col;
+      if (sort.col === col) {
+        sort.dir = sort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sort.col = col;
+        sort.dir = 'asc';
+      }
+      renderMatches(viewKey);
+    });
+  }
 }
 
 document.querySelector('#watches-table tbody').addEventListener('change', async (e) => {
@@ -809,7 +859,55 @@ document.querySelector('#matches-table tbody').addEventListener('click', async (
   }
 });
 
-$('hide-low').addEventListener('change', () => renderMatches(currentMatches));
+// Follow checkbox on a Listings row: tag/untag for the Following tab.
+document.querySelector('#matches-table tbody').addEventListener('change', async (e) => {
+  const cb = e.target.closest('input.follow-cb');
+  if (!cb) return;
+  cb.disabled = true;
+  try {
+    await api(`/api/matches/${cb.dataset.id}/follow`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ followed: cb.checked }),
+    });
+    const row = listingViews.listings.rows.find((m) => m.id === Number(cb.dataset.id));
+    if (row) row.followed = cb.checked ? 1 : 0;
+  } catch (err) {
+    setError(err.message);
+    cb.checked = !cb.checked;
+  } finally {
+    cb.disabled = false;
+  }
+});
+
+document.querySelector('#following-table tbody').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button.match-unfollow');
+  if (!btn) return;
+  try {
+    await api(`/api/matches/${btn.dataset.id}/follow`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ followed: false }),
+    });
+    await loadFollowingView();
+  } catch (err) {
+    setError(err.message);
+  }
+});
+
+$('hide-low').addEventListener('change', () => renderMatches('listings'));
+
+// Per-table search boxes, same feel as the disparity tab's.
+for (const [viewKey, inputId] of [['listings', 'listing-search'], ['following', 'following-search']]) {
+  let debounce = null;
+  $(inputId).addEventListener('input', (e) => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      listingViews[viewKey].search = e.target.value.trim();
+      renderMatches(viewKey);
+    }, 200);
+  });
+}
 
 // --- check-now + status ---
 
@@ -847,6 +945,7 @@ async function refreshCheckStatus() {
     checkPollTimer = null;
     await loadWatches().catch(() => {});
     if (currentView === 'listings') await loadListingsView().catch(() => {});
+    if (currentView === 'following') await loadFollowingView().catch(() => {});
   }
   checkWasRunning = s.running;
   return s;
@@ -902,6 +1001,7 @@ $('check-cancel-btn').addEventListener('click', () => api('/api/watch-check/canc
     }, 30000);
     if (location.hash === '#watched') switchView('watched');
     if (location.hash === '#listings') switchView('listings');
+    if (location.hash === '#following') switchView('following');
   } catch (err) {
     setError(err.message);
   }

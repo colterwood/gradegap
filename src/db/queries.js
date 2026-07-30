@@ -315,8 +315,16 @@ export function makeQueries(db) {
         AND gp_psa.grade = w.grade
       WHERE (@watchId IS NULL OR l.watch_id = @watchId)
         AND instr(@statuses, '|' || l.status || '|') > 0
+        AND (@followed IS NULL OR l.followed = @followed)
       ORDER BY l.found_at DESC, l.id DESC
       LIMIT @limit
+    `),
+    // Following tab: tag/untag a listing. Untagging resets the ending-soon
+    // dedupe flag so a re-follow can alert again.
+    setListingFollowed: db.prepare(`
+      UPDATE listings SET followed = @followed,
+        follow_reminder_sent = CASE WHEN @followed = 0 THEN 0 ELSE follow_reminder_sent END
+      WHERE id = @id
     `),
     countActiveMatches: db.prepare(`SELECT COUNT(*) AS n FROM listings WHERE status IN ('new','notified')`),
     setListingStatus: db.prepare(`UPDATE listings SET status = ? WHERE id = ?`),
@@ -342,15 +350,32 @@ export function makeQueries(db) {
     `),
     // Auctions entering the ending-soon window that haven't had their
     // reminder push yet. @minutes is concatenated into the datetime modifier
-    // string, which SQLite allows as an expression.
+    // string, which SQLite allows as an expression. Followed listings are
+    // excluded — they get their own richer per-item alert below.
     reminderCandidates: db.prepare(`
       SELECT * FROM listings
       WHERE listing_type = 'auction' AND status IN ('new','notified') AND reminder_sent = 0
+        AND followed = 0
         AND ends_at IS NOT NULL AND ends_at > datetime('now')
         AND ends_at <= datetime('now', '+' || @minutes || ' minutes')
       ORDER BY ends_at
     `),
     markListingReminded: db.prepare(`UPDATE listings SET reminder_sent = 1 WHERE id = ?`),
+    // Followed auctions crossing the Following lead-time window (default
+    // 24h), each alerted once via its own dedupe flag. Joined to the watch
+    // like listMatches so the alert can name the card.
+    followReminderCandidates: db.prepare(`
+      SELECT l.*, COALESCE(c.name, w.description) AS card_name
+      FROM listings l
+      JOIN watches w ON w.id = l.watch_id
+      LEFT JOIN cards c ON c.id = w.card_id
+      WHERE l.listing_type = 'auction' AND l.status IN ('new','notified')
+        AND l.followed = 1 AND l.follow_reminder_sent = 0
+        AND l.ends_at IS NOT NULL AND l.ends_at > datetime('now')
+        AND l.ends_at <= datetime('now', '+' || @minutes || ' minutes')
+      ORDER BY l.ends_at
+    `),
+    markListingFollowReminded: db.prepare(`UPDATE listings SET follow_reminder_sent = 1 WHERE id = ?`),
 
     createWatchRun: db.prepare(`INSERT INTO watch_check_runs (trigger_kind) VALUES (?)`),
     getWatchRun: db.prepare(`SELECT * FROM watch_check_runs WHERE id = ?`),

@@ -18,6 +18,8 @@ export function openDb(dbPath = path.join(config.dataDir, 'gradegap.db')) {
   // TABLE IF NOT EXISTS won't alter a table that predates a new column).
   ensureColumn(db, 'grade_prices', 'population', 'INTEGER');
   ensureColumn(db, 'grade_prices', 'num_sales', 'INTEGER');
+  ensureColumn(db, 'listings', 'followed', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'listings', 'follow_reminder_sent', 'INTEGER NOT NULL DEFAULT 0');
   purgeDismissedAndEndedListings(db);
   db.pragma('foreign_keys = ON');
   return db;

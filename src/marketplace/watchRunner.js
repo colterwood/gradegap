@@ -11,7 +11,18 @@ import { buildQueries, scoreListing } from './match.js';
 import { createMarketplaceSources } from './sources/index.js';
 import { withTimeout } from './sources/util.js';
 import { createFx } from './fx.js';
-import { sendNtfy } from './notify.js';
+import { sendNtfy, sendEmail } from './notify.js';
+
+// Did a re-sighted listing's price actually go DOWN? Native currency only —
+// comparing across a currency change (or through the USD conversion) would
+// let FX drift fake a "drop" the seller never made. Sub-cent noise ignored.
+export function priceDropped(existing, raw) {
+  const oldPrice = existing?.price;
+  const newPrice = raw?.price;
+  if (oldPrice == null || newPrice == null) return false;
+  if ((existing.currency ?? 'USD') !== (raw.currency ?? 'USD')) return false;
+  return newPrice < oldPrice - 0.004;
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const jitter = () => 200 + Math.floor(Math.random() * 600);
@@ -34,6 +45,10 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
   let donePromise = null;
   let timer = null;
   let skippedSources = [];
+  // Price drops on followed Buy It Nows, collected during the run and
+  // flushed by notifyAfterRun. Kept on the runner (not per-call) so tests
+  // and status() can see what the last run found.
+  let priceDrops = [];
 
   function status() {
     const run = q.latestWatchRun.get() ?? null;
@@ -47,6 +62,9 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
       // never a dead end.
       failures: run ? q.watchRunFailures.all(run.id) : [],
       skippedSources,
+      // What the last completed run flagged on followed Buy It Nows —
+      // surfaced for tests and debugging; the UI doesn't render it (yet).
+      priceDrops,
     };
   }
 
@@ -64,6 +82,18 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
         (canonicalKey ? q.getListingByCanonical.get(canonicalKey) : undefined);
       const priceUsd = fx.toUsd(raw.price, raw.currency);
       if (existing) {
+        // Followed Buy It Now re-sighted at a lower native price -> alert
+        // material. Captured BEFORE the refresh overwrites the old price.
+        if (existing.followed && existing.listing_type === 'fixed' && priceDropped(existing, raw)) {
+          priceDrops.push({
+            id: existing.id,
+            title: raw.title ?? existing.title,
+            url: raw.url ?? existing.url,
+            oldPrice: existing.price,
+            newPrice: raw.price,
+            currency: existing.currency ?? 'USD',
+          });
+        }
         q.refreshListing.run({
           id: existing.id,
           title: raw.title,
@@ -246,6 +276,49 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
       });
       if (ok) for (const l of ending) q.markListingReminded.run(l.id);
     }
+
+    // --- Following-tab alerts: per-item ntfy (deep link to the listing)
+    // plus one digest email per run covering everything that fired. An
+    // ending-soon item is marked reminded only after at least one channel
+    // actually delivered — if both fail it stays unmarked and retries next
+    // run. Price drops need no flag: a further drop is a new event, and an
+    // unchanged price simply isn't a drop on the next re-sighting.
+    const money = (n, cur) =>
+      n == null ? '?' : `${cur && cur !== 'USD' ? cur + ' ' : '$'}${Number(n).toLocaleString('en-US')}`;
+    const emailLines = [];
+
+    const followHours = Math.round(config.followRemindMin / 60);
+    const followEnding = q.followReminderCandidates.all({ minutes: config.followRemindMin });
+    for (const l of followEnding) {
+      l._ntfyOk = await sendNtfy({
+        title: `Ending within ${followHours}h — you follow this`,
+        message: `${l.title} · ${money(l.price, l.currency)}`,
+        clickUrl: l.url ?? watchedUrl,
+        priority: 'high',
+      });
+      emailLines.push(`ENDING within ${followHours}h: ${l.title}\n  current ${money(l.price, l.currency)} · ends ${l.ends_at} UTC\n  ${l.url ?? watchedUrl}`);
+    }
+
+    for (const d of priceDrops) {
+      await sendNtfy({
+        title: 'Price drop — you follow this',
+        message: `${d.title} · ${money(d.oldPrice, d.currency)} → ${money(d.newPrice, d.currency)}`,
+        clickUrl: d.url ?? watchedUrl,
+        priority: 'high',
+      });
+      emailLines.push(`PRICE DROP: ${d.title}\n  ${money(d.oldPrice, d.currency)} → ${money(d.newPrice, d.currency)}\n  ${d.url ?? watchedUrl}`);
+    }
+
+    const emailOk =
+      emailLines.length > 0 &&
+      (await sendEmail({
+        subject: `GradeGap: ${plural(emailLines.length, 'alert')} on followed listings`,
+        text: emailLines.join('\n\n') + `\n\nFollowing tab: ${watchedUrl}`,
+      }));
+
+    for (const l of followEnding) {
+      if (l._ntfyOk || emailOk) q.markListingFollowReminded.run(l.id);
+    }
   }
 
   async function start({ trigger = 'manual' } = {}) {
@@ -284,6 +357,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
     running = true;
     cancelRequested = false;
     lastError = null;
+    priceDrops = [];
 
     donePromise = (async () => {
       try {

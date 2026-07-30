@@ -92,6 +92,16 @@ export const config = {
   wooShops: listEnv('WOO_SHOPS', 'galaxy-auctions.com:CAD'),
   ntfyTopic: process.env.NTFY_TOPIC || '',
   ntfyServer: process.env.NTFY_SERVER || 'https://ntfy.sh',
+  // Following-tab alerts. Lead time for the per-item "auction ending soon"
+  // alert on followed listings (minutes; default 24h), and email delivery:
+  // alerts go to EMAIL_TO via Gmail SMTP using GMAIL_USER + a Google App
+  // Password (NOT the account password — create one at
+  // https://myaccount.google.com/apppasswords, requires 2-Step Verification).
+  // Any of the three left empty disables email; ntfy still fires.
+  followRemindMin: intEnv('FOLLOW_REMIND_MIN', 1440),
+  emailTo: process.env.EMAIL_TO || '',
+  gmailUser: process.env.GMAIL_USER || '',
+  gmailAppPassword: process.env.GMAIL_APP_PASSWORD || '',
   // Where a phone notification should link to. localhost only resolves on
   // the machine running the app, so set APP_BASE_URL (e.g. your laptop's
   // LAN address, or a VPN/Tailscale hostname) to make pushes tappable from

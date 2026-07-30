@@ -93,7 +93,17 @@ export function makeWatchRouter(db, q, watchRunner) {
       .filter((s) => ['new', 'notified'].includes(s));
     const watchId = parseInt(req.query.watchId, 10) || null;
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
-    res.json(q.listMatches.all({ watchId, statuses: `|${statuses.join('|')}|`, limit }));
+    // followed=1 -> Following tab; followed=0 -> unfollowed only; absent -> all.
+    const followed = req.query.followed === '1' ? 1 : req.query.followed === '0' ? 0 : null;
+    res.json(q.listMatches.all({ watchId, statuses: `|${statuses.join('|')}|`, limit, followed }));
+  });
+
+  // Tag/untag a listing for the Following tab.
+  router.post('/matches/:id/follow', (req, res) => {
+    const id = Number(req.params.id);
+    if (!q.getListingById.get(id)) return res.status(404).json({ ok: false, error: 'no such listing' });
+    q.setListingFollowed.run({ id, followed: req.body?.followed ? 1 : 0 });
+    res.json({ ok: true });
   });
 
   // Dismissing deletes the listing outright and remembers it permanently in

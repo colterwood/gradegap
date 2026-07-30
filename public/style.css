@@ -235,7 +235,16 @@ td.watch-cell input { cursor: pointer; }
 td.cl-value { color: var(--muted); }
 
 .matches-head { margin-top: 4px; padding-top: 14px; }
-.listing-filters { display: inline-flex; gap: 18px; }
+.listing-filters { display: inline-flex; gap: 18px; align-items: center; }
+.table-search {
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  min-width: 200px;
+}
 .show-ended { color: var(--muted); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 
 .source-badge {

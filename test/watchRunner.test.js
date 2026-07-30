@@ -3,11 +3,17 @@ import assert from 'node:assert/strict';
 
 process.env.MOCK_CL = '1';
 process.env.NTFY_TOPIC = ''; // pushes disabled: new listings stay status 'new'
+// Email hard-off for tests: dotenv never overrides pre-set vars, so this
+// wins over whatever the real .env has — no test may ever send real mail.
+process.env.GMAIL_USER = '';
+process.env.GMAIL_APP_PASSWORD = '';
+process.env.EMAIL_TO = '';
 
 const { openDb } = await import('../src/db/db.js');
 const { makeQueries } = await import('../src/db/queries.js');
 const { createSyncManager } = await import('../src/sync/syncRunner.js');
-const { createWatchRunner } = await import('../src/marketplace/watchRunner.js');
+const { createWatchRunner, priceDropped } = await import('../src/marketplace/watchRunner.js');
+const { sendEmail, emailConfigured } = await import('../src/marketplace/notify.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -50,7 +56,7 @@ test('check finds, scores, and stores matching listings; hard failures are dropp
   assert.equal(run.items_failed, 0);
   assert.equal(run.new_listings, 3);
 
-  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
+  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null });
   const ids = stored.map((l) => l.listing_id).sort();
   // wrong grade (SGC 9), wrong grader (PSA 10), wrong player (Bird) never
   // stored; the long-ended auction is found by the search but never even
@@ -89,7 +95,7 @@ test('the PSA side of the same card matches the PSA vault listing', async () => 
   const { q, runner, watch } = await freshWatched({ company: 'PSA' });
   await runner.start({});
   await waitUntilDone(runner);
-  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
+  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null });
   assert.deepEqual(stored.map((l) => l.listing_id), ['mkt-psa-side']);
 });
 
@@ -97,7 +103,7 @@ test('max_price caps new listings in USD', async () => {
   const { q, runner, watch } = await freshWatched({ maxPrice: 1000 });
   await runner.start({});
   await waitUntilDone(runner);
-  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
+  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null });
   // only the $49 reprint sneaks under a $1,000 cap
   assert.deepEqual(stored.map((l) => l.listing_id), ['mkt-reprint']);
 });
@@ -137,6 +143,105 @@ test('reminder window and staleness queries behave', async () => {
   assert.equal(q.getListingByKey.get('mockmarket', 'mkt-fixed-cad'), undefined);
 });
 
+test('follow flag: round-trip, Following filter, unfollow resets the reminder flag', async () => {
+  const { q, runner, watch } = await freshWatched();
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  const auction = q.getListingByKey.get('mockmarket', 'mkt-auction-1');
+  q.setListingFollowed.run({ id: auction.id, followed: 1 });
+
+  // followed=1 returns only the tagged row; followed=null returns everything.
+  const followedRows = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: 1 });
+  assert.deepEqual(followedRows.map((l) => l.listing_id), ['mkt-auction-1']);
+  const allRows = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null });
+  assert.ok(allRows.length > followedRows.length);
+
+  // Unfollowing resets follow_reminder_sent so a later re-follow can alert again.
+  q.markListingFollowReminded.run(auction.id);
+  assert.equal(q.getListingById.get(auction.id).follow_reminder_sent, 1);
+  q.setListingFollowed.run({ id: auction.id, followed: 0 });
+  const after = q.getListingById.get(auction.id);
+  assert.equal(after.followed, 0);
+  assert.equal(after.follow_reminder_sent, 0);
+});
+
+test('followed auctions leave the generic reminder and enter the Following one, once', async () => {
+  const { db, q, runner } = await freshWatched();
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  db.prepare(`UPDATE listings SET ends_at = datetime('now', '+10 hours') WHERE listing_id = 'mkt-auction-1'`).run();
+  const auction = q.getListingByKey.get('mockmarket', 'mkt-auction-1');
+
+  // Unfollowed: generic aggregate only.
+  assert.equal(q.reminderCandidates.all({ minutes: 1440 }).length, 1);
+  assert.equal(q.followReminderCandidates.all({ minutes: 1440 }).length, 0);
+
+  // Followed: swaps lists — the per-item alert owns it now.
+  q.setListingFollowed.run({ id: auction.id, followed: 1 });
+  assert.equal(q.reminderCandidates.all({ minutes: 1440 }).length, 0);
+  const due = q.followReminderCandidates.all({ minutes: 1440 });
+  assert.deepEqual(due.map((l) => l.listing_id), ['mkt-auction-1']);
+  assert.ok(due[0].card_name, 'joined to the watch for the alert text');
+
+  // Outside the window (10h to go, 1h window) -> not due.
+  assert.equal(q.followReminderCandidates.all({ minutes: 60 }).length, 0);
+  // Dedupe flag: alerted once, never again.
+  q.markListingFollowReminded.run(auction.id);
+  assert.equal(q.followReminderCandidates.all({ minutes: 1440 }).length, 0);
+});
+
+test('priceDropped: native-currency decreases only', () => {
+  const fixed = (over) => ({ price: 100, currency: 'USD', ...over });
+  assert.equal(priceDropped(fixed(), { price: 90, currency: 'USD' }), true);
+  assert.equal(priceDropped(fixed(), { price: 100, currency: 'USD' }), false);
+  assert.equal(priceDropped(fixed(), { price: 110, currency: 'USD' }), false);
+  // FX guard: a currency change is never a "drop", whatever the number says.
+  assert.equal(priceDropped(fixed(), { price: 90, currency: 'CAD' }), false);
+  // Missing currency defaults to USD on both sides.
+  assert.equal(priceDropped({ price: 100, currency: null }, { price: 90 }), true);
+  // Unknown prices can't drop; sub-cent noise is ignored.
+  assert.equal(priceDropped(fixed({ price: null }), { price: 90, currency: 'USD' }), false);
+  assert.equal(priceDropped(fixed(), { price: null, currency: 'USD' }), false);
+  assert.equal(priceDropped(fixed(), { price: 99.999, currency: 'USD' }), false);
+});
+
+test('a followed Buy It Now re-sighted cheaper is flagged as a price drop', async () => {
+  const { db, q, runner } = await freshWatched();
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  // Follow the CAD fixed listing, then pretend its stored price predates a
+  // seller discount: bump it ABOVE the fixture price so the next re-sighting
+  // (at the fixture's 36,000 CAD) is a decrease.
+  const cad = q.getListingByKey.get('mockmarket', 'mkt-fixed-cad');
+  db.prepare(`UPDATE listings SET followed = 1, price = 40000 WHERE id = ?`).run(cad.id);
+
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  const drops = runner.status().priceDrops;
+  assert.equal(drops.length, 1);
+  assert.equal(drops[0].id, cad.id);
+  assert.equal(drops[0].oldPrice, 40000);
+  assert.equal(drops[0].newPrice, 36000);
+  assert.equal(drops[0].currency, 'CAD');
+  // The refresh itself still landed the new price.
+  assert.equal(q.getListingById.get(cad.id).price, 36000);
+
+  // Same price on the NEXT check -> no phantom drop.
+  await runner.start({});
+  await waitUntilDone(runner);
+  assert.equal(runner.status().priceDrops.length, 0);
+});
+
+test('email: unconfigured send is a clean false, never a throw', async () => {
+  // The test env sets none of GMAIL_USER / GMAIL_APP_PASSWORD / EMAIL_TO.
+  assert.equal(emailConfigured(), false);
+  assert.equal(await sendEmail({ subject: 'x', text: 'y' }), false);
+});
+
 test('dismissing a listing deletes it and blocks it from ever coming back', async () => {
   const { db, q, runner, watch } = await freshWatched();
   await runner.start({});
@@ -161,7 +266,7 @@ test('dismissing a listing deletes it and blocks it from ever coming back', asyn
   await runner.start({});
   await waitUntilDone(runner);
   assert.equal(q.getListingByKey.get('mockmarket', 'mkt-reprint'), undefined);
-  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
+  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null });
   assert.ok(!stored.some((l) => l.listing_id === 'mkt-reprint'));
 });
 
@@ -183,7 +288,7 @@ test('psa_value tracks the watched grade, not a hard-coded PSA 10', async () => 
   // The assertion below is only meaningful if the fixture separates them.
   assert.ok(psa9 != null && psa10 != null && psa9 !== psa10, 'fixture has distinct PSA 9 / PSA 10 values');
 
-  const rows = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
+  const rows = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null });
   assert.ok(rows.length > 0, 'the SGC 9 watch matched at least one listing');
   for (const r of rows) {
     assert.equal(r.psa_value, psa9, `${r.listing_id} should carry the PSA 9 value`);
@@ -198,7 +303,7 @@ test('a PSA watch reports its own value as psa_value', async () => {
   await runner.start({});
   await waitUntilDone(runner);
 
-  const rows = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
+  const rows = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null });
   assert.ok(rows.length > 0);
   for (const r of rows) {
     assert.ok(r.psa_value != null, 'PSA watch must still resolve a psa_value');
