@@ -73,10 +73,25 @@ export function parseWooHtml(html, { domain, currency }) {
 
 export async function searchWooShop({ domain, currency = 'CAD' }, text) {
   const params = new URLSearchParams({ search: text, per_page: '20' });
-  const res = await fetchWithTimeout(`https://${domain}/wp-json/wc/store/v1/products?${params}`, {
-    headers: { accept: 'application/json' },
-    timeoutMs: 15_000,
-  });
+  // Budget WordPress hosts stall well past 15s under load (galaxy-auctions
+  // answered in 3s one minute and timed out the next, live-observed), so:
+  // a generous window, and one retry when the first attempt times out.
+  let res;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await fetchWithTimeout(`https://${domain}/wp-json/wc/store/v1/products?${params}`, {
+        headers: { accept: 'application/json' },
+        timeoutMs: 25_000,
+      });
+      break;
+    } catch (err) {
+      if (err.timedOut && attempt === 1) {
+        debugLog('woocommerce', `${domain} attempt 1 timed out — retrying once`);
+        continue;
+      }
+      throw err;
+    }
+  }
   if (res.status === 429) throw Object.assign(new Error(`${domain} rate limited (429)`), { rateLimited: true });
 
   if (res.ok) {

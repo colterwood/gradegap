@@ -19,6 +19,16 @@ export async function fetchWithTimeout(url, { timeoutMs = 20_000, headers, ...op
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     return await fetch(url, { ...opts, headers: { ...BROWSER_HEADERS, ...headers }, signal: ctl.signal });
+  } catch (err) {
+    // Our own timer firing surfaces as a bare AbortError ("This operation
+    // was aborted") — rethrow with the facts a failure report needs.
+    if (err?.name === 'AbortError' && ctl.signal.aborted) {
+      throw Object.assign(
+        new Error(`timed out after ${Math.round(timeoutMs / 1000)}s: ${url.split('?')[0]}`),
+        { timedOut: true }
+      );
+    }
+    throw err;
   } finally {
     clearTimeout(t);
   }

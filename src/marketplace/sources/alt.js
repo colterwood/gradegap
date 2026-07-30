@@ -213,20 +213,26 @@ export function createAltSource() {
       sniffed = [];
       requestLog = [];
       await gotoStable(page, `${SITE}/`);
-      await page.waitForTimeout(2000);
 
+      // The search input renders late on slow loads (SPA hydration) — a
+      // fixed 2s wait lost that race intermittently: "no search box on the
+      // homepage" on one check, fine on the next. Poll for up to 15s.
       let box = null;
-      for (const sel of SEARCH_INPUTS) {
-        const candidate = page.locator(sel).first();
-        if (await candidate.isVisible().catch(() => false)) {
-          box = candidate;
-          debugLog('alt', `search input: ${sel}`);
-          break;
+      const deadline = Date.now() + 15_000;
+      while (!box && Date.now() < deadline) {
+        for (const sel of SEARCH_INPUTS) {
+          const candidate = page.locator(sel).first();
+          if (await candidate.isVisible().catch(() => false)) {
+            box = candidate;
+            debugLog('alt', `search input: ${sel}`);
+            break;
+          }
         }
+        if (!box) await page.waitForTimeout(500);
       }
       if (!box) {
         saveDebug('alt', 'homepage', await page.content().catch(() => ''), 'html');
-        throw new Error('Alt: no search box on the homepage — run with --debug and send the capture');
+        throw new Error('Alt: no search box on the homepage after 15s — run with --debug and send the capture');
       }
 
       await box.click().catch(() => {});

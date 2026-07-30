@@ -718,3 +718,24 @@ test('hibid: seller carries house and location so CA vs US is visible', async ()
   ]);
   assert.equal(out[0].seller, 'Prairie Auctions — Calgary, AB');
 });
+
+test('fetchWithTimeout: a timeout reports itself as one, never a bare abort', async () => {
+  // "This operation was aborted" in a check-run failure told the user
+  // nothing. A server that accepts and never answers forces the timer path.
+  const { createServer } = await import('node:http');
+  const { fetchWithTimeout } = await import('../src/marketplace/sources/util.js');
+  const srv = createServer(() => { /* hold the socket open, never respond */ });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    await assert.rejects(
+      () => fetchWithTimeout(`http://127.0.0.1:${srv.address().port}/slow?q=x`, { timeoutMs: 300 }),
+      (err) =>
+        err.timedOut === true &&
+        /timed out after \ds/.test(err.message) &&
+        err.message.includes('/slow') &&
+        !err.message.includes('q=x') // query strings can carry card names; keep them out of error text
+    );
+  } finally {
+    srv.close();
+  }
+});
