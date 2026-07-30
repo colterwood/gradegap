@@ -164,3 +164,44 @@ test('dismissing a listing deletes it and blocks it from ever coming back', asyn
   const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
   assert.ok(!stored.some((l) => l.listing_id === 'mkt-reprint'));
 });
+
+test('psa_value tracks the watched grade, not a hard-coded PSA 10', async () => {
+  // Regression: the Listings tab briefly showed the PSA *10* value for every
+  // row, which is meaningless for the many watches graded below 10 — an
+  // SGC 9 has to be read against PSA 9.
+  const { db, q, runner, watch, card } = await freshWatched({ company: 'SGC', grade: '9' });
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  const priceAt = (company, grade) =>
+    db
+      .prepare(`SELECT cl_value FROM grade_prices WHERE card_id = ? AND grading_company = ? AND grade = ?`)
+      .get(card.id, company, grade)?.cl_value ?? null;
+
+  const psa9 = priceAt('PSA', '9');
+  const psa10 = priceAt('PSA', '10');
+  // The assertion below is only meaningful if the fixture separates them.
+  assert.ok(psa9 != null && psa10 != null && psa9 !== psa10, 'fixture has distinct PSA 9 / PSA 10 values');
+
+  const rows = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
+  assert.ok(rows.length > 0, 'the SGC 9 watch matched at least one listing');
+  for (const r of rows) {
+    assert.equal(r.psa_value, psa9, `${r.listing_id} should carry the PSA 9 value`);
+    assert.notEqual(r.psa_value, psa10);
+  }
+});
+
+test('a PSA watch reports its own value as psa_value', async () => {
+  // Degenerate but correct: watching a PSA slab means cl_value and psa_value
+  // are the same number — the join must not silently drop to NULL.
+  const { q, runner, watch } = await freshWatched({ company: 'PSA', grade: '10' });
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  const rows = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
+  assert.ok(rows.length > 0);
+  for (const r of rows) {
+    assert.ok(r.psa_value != null, 'PSA watch must still resolve a psa_value');
+    assert.equal(r.psa_value, r.cl_value);
+  }
+});
