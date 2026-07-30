@@ -45,8 +45,14 @@ Requires [Node.js 20+](https://nodejs.org).
 ```bash
 npm install
 npx playwright install chromium
-cp .env.example .env        # defaults are fine; nothing is required
 ```
+
+Configuration is optional — the app runs with sensible defaults. To set
+API keys or tuning knobs, create a file named exactly `.env` (no other
+extension — Windows Notepad likes to save it as `.env.txt`, which is
+silently ignored) in the project folder, using the
+[Configuration reference](#configuration-reference-env) below. Check your
+setup any time with `npm run doctor`.
 
 ## First run
 
@@ -119,8 +125,8 @@ scorers are highlighted so *you* make the final call (Dismiss clears them).
 - **Sources** (`WATCH_SOURCES`): each marketplace is a small adapter under
   `src/marketplace/sources/`. Shipping today:
   - **No browser needed**: `ebay` (official Browse API across the US/CA/UK/
-    DE/FR/IT marketplaces — needs a free developer keyset, see
-    `.env.example`), `fanatics` (Fanatics Collect / ex-PWCC), `comc`,
+    DE/FR/IT marketplaces — needs a free developer keyset, see the
+    Configuration reference below), `fanatics` (Fanatics Collect / ex-PWCC), `comc`,
     `goldin`, `cia` (Collector Investor Auctions), `classic` (Classic
     Auctions, Montreal), `miller` (Miller & Miller, Ontario), and `shopify`
     — a generic adapter for any Shopify card shop's public search (Flip
@@ -179,6 +185,76 @@ src/marketplace/   the watcher: match.js (query building + title scoring),
                    fx.js (USD conversion), notify.js (ntfy pushes), and
                    sources/ (one small adapter per marketplace + mock)
 public/            the web UI (no build step)
+```
+
+## Configuration reference (.env)
+
+Everything is optional; create `.env` in the project folder only for what
+you want to change. Restart the app after editing (config is read once at
+startup). `npm run doctor` shows what the app actually loaded.
+
+```ini
+# Card Ladder credentials — OPTIONAL, only pre-fill the `npm run login` form.
+# Recommended: leave blank and type them in the browser window yourself.
+CL_EMAIL=
+CL_PASSWORD=
+
+# Port for the local web UI
+PORT=4000
+
+# Run the sync browser headless. Keep false — a visible browser is more
+# reliable against Cloudflare bot detection.
+HEADLESS=false
+
+# Ladder crawl tuning: hits per page, polite delay between page requests.
+CRAWL_LIMIT=100
+PAGE_DELAY_MS=1200
+
+# 1 = built-in mock data instead of Card Ladder (dev/testing, no account)
+MOCK_CL=
+
+# 1 = dump all captured network traffic to captures/<timestamp>/ during sync
+DISCOVERY=
+
+# ===== Marketplace watcher =====
+
+# Minutes between automatic checks while the server runs. 0 = manual only.
+WATCH_INTERVAL_MIN=30
+
+# Lead time (minutes) for the "watched auctions ending soon" push.
+# 1440 = 24 hours before close.
+WATCH_REMIND_MIN=1440
+
+# Which sources to check. "all" (default) = every adapter — sources missing
+# their setup (eBay without keys, shopify without shops) are skipped with a
+# note, and one broken source never affects the others. Or a comma-separated
+# subset. Available: ebay, shopify, fanatics, comc, goldin, cia, classic,
+# miller, hibid, heritage, myslabs, pristine, catawiki
+# (goldin/hibid/heritage/myslabs/pristine/catawiki OPEN THE BROWSER — they
+# share Sync's Chromium profile and wait while a Card Ladder sync runs.)
+# Verify any source from your machine:
+#   npm run test-source -- <source> "jordan psa 10"
+WATCH_SOURCES=all
+
+# eBay Browse API — free developer account at https://developer.ebay.com,
+# production keyset: App ID = client id, Cert ID = client secret. Free tier
+# is 5,000 calls/day; each check spends ~(watches × marketplaces) calls —
+# raise WATCH_INTERVAL_MIN if you watch hundreds of cards.
+EBAY_CLIENT_ID=
+EBAY_CLIENT_SECRET=
+# 'production' or 'sandbox' (sandbox data is junk — wiring tests only)
+EBAY_ENV=production
+EBAY_MARKETPLACES=EBAY_US,EBAY_CA,EBAY_GB,EBAY_DE,EBAY_FR,EBAY_IT
+
+# Generic Shopify-shop source: comma-separated shop domains, optional
+# currency suffix (default CAD). Example:
+# SHOPIFY_SHOPS=flipcollect.com:CAD,www.mintink.ca:CAD,overtimesportscards.ca:CAD
+SHOPIFY_SHOPS=
+
+# Phone pushes via ntfy.sh: install the ntfy app, subscribe to a long random
+# private topic name, put it here. Empty = pushes disabled.
+NTFY_TOPIC=
+NTFY_SERVER=https://ntfy.sh
 ```
 
 ## A note on terms of service

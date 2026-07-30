@@ -67,7 +67,7 @@ export function createShopifySource() {
 
     async start() {
       if (shops.length === 0) {
-        throw new Error('shopify source enabled but SHOPIFY_SHOPS is empty (see .env.example)');
+        throw new Error('shopify source enabled but SHOPIFY_SHOPS is empty (see README Configuration reference)');
       }
     },
 

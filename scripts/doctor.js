@@ -32,7 +32,7 @@ if (rootEnvPath !== envPath) {
 // Look-alikes: .env.txt, .env.env, ENV, etc.
 try {
   const strays = readdirSync(process.cwd())
-    .filter((f) => /^\.?env/i.test(f) && f !== '.env' && f !== '.env.example');
+    .filter((f) => /^\.?env/i.test(f) && f !== '.env');
   if (strays.length) {
     console.log(`  !! look-alike files found: ${strays.join(', ')}`);
     console.log(`     Windows Notepad saves ".env" as ".env.txt" — rename it to exactly .env`);

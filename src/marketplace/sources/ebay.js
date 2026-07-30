@@ -94,7 +94,7 @@ export function createEbaySource() {
     // of every watch failing.
     configured() {
       if (!config.ebayClientId || !config.ebayClientSecret) {
-        return 'set EBAY_CLIENT_ID / EBAY_CLIENT_SECRET in .env (free developer keyset — see .env.example)';
+        return 'set EBAY_CLIENT_ID / EBAY_CLIENT_SECRET in .env (free developer keyset — see the Configuration reference in README, and run `npm run doctor` to check your .env)';
       }
       return null;
     },
@@ -102,7 +102,7 @@ export function createEbaySource() {
     async start(ctx = {}) {
       q = ctx.q ?? null;
       if (!config.ebayClientId || !config.ebayClientSecret) {
-        throw new Error('eBay credentials missing — set EBAY_CLIENT_ID / EBAY_CLIENT_SECRET (see .env.example)');
+        throw new Error('eBay credentials missing — set EBAY_CLIENT_ID / EBAY_CLIENT_SECRET (see README Configuration reference)');
       }
       loadCachedToken();
       await ensureToken();
