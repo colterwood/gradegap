@@ -35,6 +35,11 @@ export function extractAltListings(node, depth = 0, out = []) {
   return out;
 }
 
+// Telemetry/vendor hosts whose JSON is never card data (PostHog surveys
+// were the live false positive).
+export const ANALYTICS_HOST_RE =
+  /(^|\.)(posthog\.com|i\.posthog\.com|sentry\.io|segment\.(com|io)|google-analytics\.com|googletagmanager\.com|doubleclick\.net|facebook\.(com|net)|intercom\.io|datadoghq\.com|cloudflareinsights\.com|launchdarkly\.com|amplitude\.com|mixpanel\.com|hotjar\.com|fullstory\.com|stripe\.com|recaptcha\.net|gstatic\.com)$/i;
+
 // A card listing always has a price and a card-shaped title. Live testing
 // showed the naive "object with an id and a name" test also swallowing
 // auction-cycle date ranges and analytics survey definitions.
@@ -95,9 +100,12 @@ export function createAltSource() {
       page.on('response', async (res) => {
         try {
           const url = res.url();
-          // Alt's own hosts only — third-party analytics (PostHog, Segment…)
-          // ship object arrays that look listing-ish but aren't.
-          if (!/(^|\.)(alt\.xyz|onlyalt\.com)$/i.test(new URL(url).hostname)) return;
+          // Alt delegates search to an external service (its own
+          // SearchServiceConfig endpoint says so), so results arrive from a
+          // third-party host — an alt.xyz-only allowlist would miss them.
+          // Instead, block the telemetry vendors whose payloads merely LOOK
+          // listing-shaped; the price + card-title test does the rest.
+          if (ANALYTICS_HOST_RE.test(new URL(url).hostname)) return;
           const ct = res.headers()['content-type'] ?? '';
           if (!ct.includes('json')) return;
           const body = await res.text().catch(() => '');

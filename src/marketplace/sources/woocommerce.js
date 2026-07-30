@@ -41,14 +41,20 @@ export function parseWooProducts(products, { domain, currency }) {
 // amount per card.
 export function parseWooHtml(html, { domain, currency }) {
   const out = new Map();
+  // WooCommerce themes render a "no products matched" notice and then often
+  // show unrelated recommendations — don't mistake those for results.
+  if (/no products (?:were )?found|nothing matched your search/i.test(html)) return [];
   const re = /<a[^>]+href=["'](https?:\/\/[^"']*\/product\/([^"'/?#]+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
   for (const m of html.matchAll(re)) {
     const [, url, slug, inner] = m;
     const title = decodeEntities(inner.replace(/<[^>]+>/g, ' '));
     if (!title || title.length < 8 || out.has(slug)) continue;
     const tail = html.slice(m.index, m.index + 1500);
-    const priceText = tail.match(/woocommerce-Price-amount[^>]*>[\s\S]{0,80}?([\d.,]+)/i)?.[1]
-      ?? tail.match(/[$C]\s?([\d,]+(?:\.\d{2})?)/)?.[1];
+    // Only accept a price from Woo's own price markup — a loose "$n" scan
+    // happily matches sidebar filters and shipping banners.
+    const priceText = tail.match(
+      /woocommerce-Price-amount[\s\S]{0,200}?<bdi>[\s\S]{0,60}?([\d][\d,]*(?:\.\d{2})?)/i
+    )?.[1];
     out.set(slug, {
       listingId: `${domain}:${slug}`,
       canonicalKey: null,
@@ -74,14 +80,17 @@ export async function searchWooShop({ domain, currency = 'CAD' }, text) {
   if (res.status === 429) throw Object.assign(new Error(`${domain} rate limited (429)`), { rateLimited: true });
 
   if (res.ok) {
+    // The Store API is authoritative when it answers — including an empty
+    // result, which means "this shop has nothing matching", NOT "broken".
+    // (Falling back on empty scraped the storefront's "no results, here's
+    // our catalog" grid and returned dozens of unrelated cards.)
     const body = await res.json().catch(() => null);
     const products = Array.isArray(body) ? body : [];
     const mapped = parseWooProducts(products, { domain, currency });
     debugLog('woocommerce', `${domain} Store API → HTTP ${res.status}, ${products.length} products, ${mapped.length} mapped`);
-    if (mapped.length > 0) return mapped;
-  } else {
-    debugLog('woocommerce', `${domain} Store API → HTTP ${res.status}; falling back to product search page`);
+    return mapped;
   }
+  debugLog('woocommerce', `${domain} Store API → HTTP ${res.status}; falling back to product search page`);
 
   // Store API missing/empty — try the storefront's own search.
   const html = await fetchHtml(`https://${domain}/?s=${encodeURIComponent(text)}&post_type=product`);

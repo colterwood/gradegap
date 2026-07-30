@@ -451,3 +451,40 @@ test('alt: analytics/config objects without prices are rejected', async () => {
   // …but a card-shaped title with no price does not
   assert.equal(mapAltListing({ id: 'w', title: '1986 Fleer Michael Jordan #57 PSA 8' }), null);
 });
+
+test('woocommerce: HTML fallback ignores a "no products found" page', async () => {
+  const { parseWooHtml } = await import('../src/marketplace/sources/woocommerce.js');
+  // Live failure: Galaxy's empty search rendered the notice plus a grid of
+  // unrelated recommendations, which came back as 36 bogus "matches".
+  const html = `
+    <p class="woocommerce-info">No products were found matching your selection.</p>
+    <li class="product"><a href="https://galaxy-auctions.com/product/unrelated-card/">1970-71 Topps #3 Field Goal Leaders</a></li>`;
+  assert.deepEqual(parseWooHtml(html, { domain: 'galaxy-auctions.com', currency: 'CAD' }), []);
+});
+
+test('woocommerce: only Woo price markup counts as a price', async () => {
+  const { parseWooHtml } = await import('../src/marketplace/sources/woocommerce.js');
+  const html = `
+    <aside class="widget">Filter by price: $36 — $500</aside>
+    <li class="product"><a href="https://x.com/product/a-card-here/">1979 OPC Wayne Gretzky #18 RC</a>
+      <span class="woocommerce-Price-amount amount"><bdi><span>C$</span>12,500.00</bdi></span></li>`;
+  const out = parseWooHtml(html, { domain: 'x.com', currency: 'CAD' });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].price, 12500); // not the 36 from the sidebar filter
+});
+
+test('alt: telemetry hosts are blocked, search backends are not', async () => {
+  const { ANALYTICS_HOST_RE } = await import('../src/marketplace/sources/alt.js');
+  for (const h of ['us.i.posthog.com', 'sentry.io', 'www.google-analytics.com']) {
+    assert.ok(ANALYTICS_HOST_RE.test(h), h);
+  }
+  // Alt's own API and any external search service must get through
+  for (const h of [
+    'alt-platform-server.production.internal.onlyalt.com',
+    'alt.xyz',
+    'abc123-dsn.algolia.net',
+    'search.typesense.net',
+  ]) {
+    assert.ok(!ANALYTICS_HOST_RE.test(h), h);
+  }
+});
