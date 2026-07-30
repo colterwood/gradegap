@@ -53,9 +53,12 @@ export const CRAWL_CONDITIONS = COMPARE_GRADES.flatMap((g) => [
 
 export const config = {
   port: intEnv('PORT', 4000),
-  // Loopback by default: this app has no authentication. Set BIND_HOST to
-  // 0.0.0.0 only if you want other devices on your network to reach it.
-  bindHost: process.env.BIND_HOST || '127.0.0.1',
+  // Loopback by default: this app has no authentication. Accepts a
+  // comma-separated list, so you can add ONE more interface without
+  // exposing the rest — e.g. "127.0.0.1,100.x.y.z" (your Tailscale IP)
+  // keeps localhost working while making the app reachable from your other
+  // Tailscale devices, and nothing else.
+  bindHosts: listEnv('BIND_HOST', '127.0.0.1'),
   headless: process.env.HEADLESS === 'true',
   mock: process.env.MOCK_CL === '1' || process.argv.includes('--mock'),
   discovery: process.env.DISCOVERY === '1',

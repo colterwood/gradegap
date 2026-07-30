@@ -20,12 +20,30 @@ app.use('/api', makeApiRouter(db, q, syncManager));
 app.use('/api', makeWatchRouter(db, q, watchRunner));
 app.use(express.static(config.publicDir));
 
-app.listen(config.port, config.bindHost, () => {
-  console.log(`GradeGap running at http://localhost:${config.port}${config.mock ? '  (MOCK mode)' : ''}`);
-  if (config.bindHost !== '127.0.0.1') {
-    console.log(`  reachable on your network at ${config.bindHost}:${config.port} — this app has NO login,`);
-    console.log('  so only do this on a network you trust.');
-  }
-  // Marketplace checks run on a timer while the server is up (0 = manual only).
-  watchRunner.startScheduler();
-});
+// One listener per configured interface (BIND_HOST may list several).
+let announced = false;
+for (const host of config.bindHosts) {
+  const server = app.listen(config.port, host, () => {
+    if (!announced) {
+      console.log(`GradeGap running at http://localhost:${config.port}${config.mock ? '  (MOCK mode)' : ''}`);
+      // Checks run on a timer while the server is up (0 = manual only).
+      watchRunner.startScheduler();
+      announced = true;
+    }
+    if (host !== '127.0.0.1' && host !== 'localhost') {
+      console.log(`  also listening on ${host}:${config.port} — this app has NO login, so only`);
+      console.log('  expose interfaces you trust (a Tailscale IP is private; 0.0.0.0 is your whole LAN).');
+    }
+  });
+  server.on('error', (err) => {
+    if (err.code === 'EADDRNOTAVAIL') {
+      console.error(`\nCannot bind ${host}:${config.port} — that address doesn't exist on this machine.`);
+      console.error('If it is your Tailscale IP, make sure Tailscale is connected (`tailscale ip -4`).');
+    } else if (err.code === 'EADDRINUSE') {
+      console.error(`\nPort ${config.port} is already in use on ${host} — is GradeGap already running?`);
+    } else {
+      console.error(`\nFailed to listen on ${host}:${config.port}: ${err.message}`);
+    }
+    process.exit(1);
+  });
+}

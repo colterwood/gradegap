@@ -122,9 +122,12 @@ sub-50% matches are hidden behind a toggle so *you* make the final call
   is awake — a sleeping laptop finds nothing, and picks up where it left
   off when it wakes.
 - **Pushes reach your phone anywhere** (they relay through ntfy's servers,
-  not your local network). Tapping one opens the app, which only works from
-  the phone if you set `APP_BASE_URL` + `BIND_HOST` — see the Configuration
-  reference.
+  not your local network). To make tapping one *open the app* from your
+  phone, run it on a [Tailscale](https://tailscale.com) IP:
+  `BIND_HOST=127.0.0.1,<your tailscale ip>` plus
+  `APP_BASE_URL=http://<machine>.<tailnet>.ts.net:4000`. That's reachable
+  from your own devices anywhere and invisible on local wifi — worth
+  preferring over `0.0.0.0`, since the app has no login.
 - **Phone pushes** (optional): install the [ntfy](https://ntfy.sh) app,
   subscribe to a **long random** topic name (the name is the only secret —
   anyone who guesses it can read your alerts), set `NTFY_TOPIC` in `.env`,
@@ -222,15 +225,19 @@ CL_PASSWORD=
 # Port for the local web UI
 PORT=4000
 
-# Bind address. Default 127.0.0.1 = this machine only. Set 0.0.0.0 to reach
-# the app from your phone/tablet on the same network — the app has NO login,
-# so only do that on a network you trust.
+# Bind address(es), comma-separated. Default 127.0.0.1 = this machine only.
+# The app has NO login, so add interfaces deliberately:
+#   Tailscale (recommended): 127.0.0.1,100.x.y.z  <- your `tailscale ip -4`
+#     reachable from your own devices anywhere, invisible on local wifi
+#   Whole LAN:               0.0.0.0
+#     anyone on the same network can open it — trusted networks only
 BIND_HOST=127.0.0.1
 
 # Where phone notifications should link to. Default is localhost, which only
-# opens on the machine running the app; set this to your laptop's LAN address
-# (e.g. http://192.168.1.50:4000) or a VPN/Tailscale hostname to make pushes
-# tappable from the phone. Pair with BIND_HOST=0.0.0.0.
+# opens on the machine running the app. Set this so pushes are tappable from
+# your phone, e.g. a Tailscale MagicDNS name (stable, works anywhere):
+#   APP_BASE_URL=http://my-laptop.tailnet-name.ts.net:4000
+# or a LAN address (home only): http://192.168.1.50:4000
 APP_BASE_URL=
 
 # Run the sync browser headless. Keep false — a visible browser is more
