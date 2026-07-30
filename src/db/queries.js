@@ -294,20 +294,25 @@ export function makeQueries(db) {
     `),
     // cl_value = the Card Ladder value for the watched card at that exact
     // grader+grade, so a listing's asking price can be read against it.
-    // NULL for manual watches (no Ladder card behind them).
+    // psa_value = the same card's PSA value AT THE SAME GRADE (an SGC 9
+    // watch compares against PSA 9, not PSA 10) — the like-for-like number
+    // the whole app is built around. Both are NULL for manual watches (no
+    // Ladder card behind them), and psa_value simply equals cl_value when
+    // the watch is itself a PSA slab.
     listMatches: db.prepare(`
       SELECT l.*, w.grading_company, w.grade, w.card_id,
              COALESCE(c.name, w.description) AS card_name, p.name AS player_name,
              gp.cl_value AS cl_value,
-             gp10.cl_value AS psa10_value
+             gp_psa.cl_value AS psa_value
       FROM listings l
       JOIN watches w ON w.id = l.watch_id
       LEFT JOIN cards c ON c.id = w.card_id
       LEFT JOIN players p ON p.id = c.player_id
       LEFT JOIN grade_prices gp
         ON gp.card_id = w.card_id AND gp.grading_company = w.grading_company AND gp.grade = w.grade
-      LEFT JOIN grade_prices gp10
-        ON gp10.card_id = w.card_id AND gp10.grading_company = '${BASELINE_COMPANY}' AND gp10.grade = '10'
+      LEFT JOIN grade_prices gp_psa
+        ON gp_psa.card_id = w.card_id AND gp_psa.grading_company = '${BASELINE_COMPANY}'
+        AND gp_psa.grade = w.grade
       WHERE (@watchId IS NULL OR l.watch_id = @watchId)
         AND instr(@statuses, '|' || l.status || '|') > 0
       ORDER BY l.found_at DESC, l.id DESC

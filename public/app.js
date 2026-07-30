@@ -610,7 +610,7 @@ function matchSortValue(m, col) {
     case 'source': case 'listing_type': return m[col] || '';
     case 'title': return (m.title || '').toLowerCase();
     case 'card_name': return watchLabel(m).toLowerCase();
-    default: return m[col]; // cl_value, psa10_value, match_score
+    default: return m[col]; // cl_value, psa_value, match_score
   }
 }
 
@@ -656,7 +656,7 @@ function renderMatches(all) {
       <td class="watch-ref">${esc(watchLabel(m))}</td>
       <td class="num">${fmtMoney(m.price_usd ?? m.price)}${m.currency && m.currency !== 'USD' ? `<div class="native-price">${esc(String(m.price))} ${esc(m.currency)}</div>` : ''}</td>
       <td class="num cl-value">${fmtMoney(m.cl_value)}</td>
-      <td class="num cl-value">${fmtMoney(m.psa10_value)}</td>
+      <td class="num cl-value">${fmtMoney(m.psa_value)}</td>
       <td>${m.listing_type === 'auction' ? 'Auction' : 'Buy It Now'}</td>
       <td>${ends}</td>
       <td class="num">${low ? `<span class="score-low" title="Low-confidence match — verify before trusting">${score}</span>` : score}</td>
