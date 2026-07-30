@@ -140,15 +140,17 @@ sub-50% matches are hidden behind a toggle so *you* make the final call
   - **No browser needed**: `ebay` (official Browse API across the US/CA/UK/
     DE/FR/IT marketplaces — needs a free developer keyset, see the
     Configuration reference below), `fanatics` (Fanatics Collect / ex-PWCC), `comc`,
-    `goldin`, `cia` (Collector Investor Auctions), `classic` (Classic
-    Auctions, Montreal), `miller` (Miller & Miller, Ontario), and `shopify`
-    — a generic adapter for any Shopify card shop's public search (Flip
-    Collectibles, Mintink, Overtime, also Graded Auction UK; list domains
-    in `SHOPIFY_SHOPS`).
+    `cia` (Collector Investor Auctions), `classic` (Classic Auctions,
+    Montreal), `miller` (Miller & Miller, Ontario), plus two generic
+    storefront adapters: `shopify` (any Shopify card shop — Flip
+    Collectibles, Mintink, Overtime, Graded Auction UK; list domains in
+    `SHOPIFY_SHOPS`) and `woocommerce` (any WooCommerce shop's public Store
+    API — Galaxy Auctions ships as the default; `WOO_SHOPS`).
   - **Browser-based** (these open the same visible Chromium the Sync uses,
     because the sites block plain clients): `hibid` (HiBid Canada
-    aggregator — dozens of Canadian houses in one source), `heritage`,
-    `myslabs`, `pristine`, `catawiki` (EU).
+    aggregator — dozens of Canadian houses in one source, **including HCE
+    Auctions**), `heritage`, `myslabs`, `pristine`, `goldin`, `alt`,
+    `catawiki` (EU).
   - **Verify before enabling**: scraped sites weren't reachable from the
     development environment, so each scraped adapter is best-effort until
     proven against the live site *from your machine*:
@@ -288,6 +290,10 @@ EBAY_MARKETPLACES=EBAY_US,EBAY_CA,EBAY_GB,EBAY_DE,EBAY_FR,EBAY_IT
 # currency suffix (default CAD). Example:
 # SHOPIFY_SHOPS=flipcollect.com:CAD,www.mintink.ca:CAD,overtimesportscards.ca:CAD
 SHOPIFY_SHOPS=
+
+# Generic WooCommerce-shop source, same form. Galaxy Auctions (Surrey BC) is
+# the default; add any other WooCommerce card shop by domain.
+WOO_SHOPS=galaxy-auctions.com:CAD
 
 # Phone pushes via ntfy.sh: install the ntfy app, subscribe to a topic, put
 # the same name here, then verify with `npm run test-notify`.

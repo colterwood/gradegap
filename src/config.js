@@ -87,6 +87,9 @@ export const config = {
   // Generic Shopify-shop adapter: "domain" or "domain:CUR" entries, e.g.
   // "flipcollect.com:CAD,mintink.ca:CAD" (currency defaults to CAD).
   shopifyShops: listEnv('SHOPIFY_SHOPS', ''),
+  // WooCommerce shops, same "domain[:CUR]" form. Galaxy Auctions (Surrey
+  // BC) ships as the default so the source works out of the box.
+  wooShops: listEnv('WOO_SHOPS', 'galaxy-auctions.com:CAD'),
   ntfyTopic: process.env.NTFY_TOPIC || '',
   ntfyServer: process.env.NTFY_SERVER || 'https://ntfy.sh',
   // Where a phone notification should link to. localhost only resolves on

@@ -29,6 +29,10 @@ export const REGISTRY = {
   classic: async () => (await import('./classic.js')).createClassicSource(),
   catawiki: async () => (await import('./catawiki.js')).createCatawikiSource(),
   miller: async () => (await import('./miller.js')).createMillerSource(),
+  alt: async () => (await import('./alt.js')).createAltSource(),
+  // Generic WooCommerce shops (Galaxy Auctions by default) — the WordPress
+  // counterpart to the shopify source.
+  woocommerce: async () => (await import('./woocommerce.js')).createWooSource(),
 };
 
 // WATCH_SOURCES=all (the default) means every adapter in the registry.

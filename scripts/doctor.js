@@ -60,6 +60,31 @@ console.log(`  EBAY_MARKETPLACES  : ${config.ebayMarketplaces.join(', ')}`);
 console.log(`  NTFY_TOPIC         : ${config.ntfyTopic || '(empty — phone pushes disabled)'}`);
 console.log(`  SHOPIFY_SHOPS      : ${config.shopifyShops.join(', ') || '(empty)'}`);
 
+// --- network / notification reachability -------------------------------
+console.log(`\nnetwork`);
+console.log(`  PORT         : ${config.port}`);
+console.log(`  BIND_HOST    : ${config.bindHosts.join(', ')}`);
+const onlyLoopback = config.bindHosts.every((h) => h === '127.0.0.1' || h === 'localhost');
+if (onlyLoopback) {
+  console.log(`                 (this machine only — add your Tailscale IP to reach it from your phone)`);
+}
+const clickBase = config.appBaseUrl || `http://localhost:${config.port}`;
+console.log(`  APP_BASE_URL : ${config.appBaseUrl || `(unset -> ${clickBase})`}`);
+if (!config.appBaseUrl) {
+  console.log(`                 notifications will link to localhost, which only opens on THIS machine`);
+} else {
+  // Catch the common mismatch: a LAN/Tailscale link while the server is
+  // still listening on loopback only.
+  const host = (() => {
+    try { return new URL(config.appBaseUrl).hostname; } catch { return ''; }
+  })();
+  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  if (!isLocal && onlyLoopback) {
+    console.log(`  !! APP_BASE_URL points at ${host} but BIND_HOST is loopback-only —`);
+    console.log(`     tapping a notification will hang. Add that address to BIND_HOST and restart.`);
+  }
+}
+
 // --- sources -----------------------------------------------------------
 const names = resolveSourceNames(config.watchSources);
 console.log(`\nWATCH_SOURCES = ${config.watchSources.join(',')} -> ${names.length} sources`);

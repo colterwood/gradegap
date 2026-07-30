@@ -353,3 +353,68 @@ test('pristine: parses Product JSON-LD, including ItemList wrappers', () => {
   assert.equal(out[0].price, 4100);
   assert.match(out[0].url, /^https:\/\/www\.pristineauction\.com\//);
 });
+
+// --- WooCommerce (Galaxy Auctions and any other Woo card shop) -----------
+
+test('woocommerce: Store API products map, minor units become dollars', async () => {
+  const { parseWooProducts } = await import('../src/marketplace/sources/woocommerce.js');
+  const out = parseWooProducts(
+    [
+      {
+        id: 4821,
+        name: '1979-80 O-Pee-Chee Wayne Gretzky #18 RC PSA 5 &#8211; Rookie',
+        permalink: 'https://galaxy-auctions.com/product/gretzky-rc-psa-5/',
+        prices: { price: '1250000', regular_price: '1250000', currency_code: 'CAD', currency_minor_unit: 2 },
+        images: [{ src: 'https://galaxy-auctions.com/img/gretzky.jpg' }],
+      },
+      { id: 77, name: 'No price product', prices: { price: '', currency_minor_unit: 2 } },
+      { name: 'no id' },
+    ],
+    { domain: 'galaxy-auctions.com', currency: 'CAD' }
+  );
+  assert.equal(out.length, 2);
+  assert.equal(out[0].price, 12500);
+  assert.equal(out[0].currency, 'CAD');
+  assert.equal(out[0].listingType, 'fixed');
+  assert.match(out[0].title, /Wayne Gretzky #18 RC PSA 5 – Rookie/); // entity decoded
+  assert.equal(out[0].listingId, 'galaxy-auctions.com:4821');
+  assert.equal(out[1].price, null);
+});
+
+// --- Alt ------------------------------------------------------------------
+
+test('alt: listing objects map tolerantly; cents-scale prices normalize', async () => {
+  const { mapAltListing, extractAltListings } = await import('../src/marketplace/sources/alt.js');
+  const fixed = mapAltListing({
+    id: 'a1',
+    title: '1986 Fleer Michael Jordan #57 PSA 8',
+    price: 1250000, // cents
+    slug: 'jordan-57-psa-8',
+  });
+  assert.equal(fixed.price, 12500);
+  assert.equal(fixed.listingType, 'fixed');
+  assert.match(fixed.url, /^https:\/\/alt\.xyz\/marketplace\/jordan-57-psa-8$/);
+
+  const auction = mapAltListing({
+    listingId: 'a2',
+    cardName: '2003 Topps Chrome LeBron James #111 BGS 9',
+    listingType: 'WEEKLY_AUCTION',
+    currentBid: { amount: 8400 },
+    endsAt: 1785540000,
+  });
+  assert.equal(auction.listingType, 'auction');
+  assert.equal(auction.price, 8400);
+  assert.match(auction.endsAt, /^20\d\d-.*Z$/);
+
+  assert.equal(mapAltListing({ id: 'x', title: 'short' }), null); // title too short
+
+  // buried arrays are found wherever they sit in the payload
+  const groups = extractAltListings({
+    data: { marketplace: { results: [
+      { id: 1, title: '1986 Fleer Michael Jordan #57 PSA 8', price: 100 },
+      { id: 2, title: '1979 OPC Wayne Gretzky #18 PSA 6', price: 200 },
+    ] } },
+  });
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].length, 2);
+});
