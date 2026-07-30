@@ -29,7 +29,15 @@ export function parseGoldinLots(body, cloudFront, listingType = 'auction') {
   for (const lot of lots) {
     const id = lot.lot_id ?? lot.id;
     if (id == null || !lot.title) continue;
-    const slug = lot.slug ?? lot.url_slug ?? lot.item_slug ?? null;
+    // Item pages are /item/<slug> (user-verified live, e.g.
+    // /item/1986-87-fleer-57-michael-jordan-bgs-nm-mt-89p99a) — the slug
+    // carries a hash suffix, so it can't be built from the title; it must
+    // come from the payload. Hunt the likely keys, including a full URL.
+    const slug =
+      lot.slug ?? lot.url_slug ?? lot.item_slug ?? lot.seo_slug ?? lot.handle ?? lot.item_id_text ?? null;
+    const directUrl = [lot.url, lot.item_url, lot.itemUrl, lot.link].find(
+      (v) => typeof v === 'string' && v.includes('/item/')
+    );
     let imageUrl = lot.primary_image_name ?? null;
     if (imageUrl && !/^https?:/.test(imageUrl) && cloudFront) {
       imageUrl = `${cloudFront.replace(/\/+$/, '')}/public/Lots/${id}/${imageUrl}`;
@@ -38,7 +46,11 @@ export function parseGoldinLots(body, cloudFront, listingType = 'auction') {
       listingId: String(id),
       canonicalKey: `goldin:${id}`,
       title: lot.title,
-      url: slug ? `${SITE}/item/${slug}` : `${SITE}/buy?search=${encodeURIComponent(lot.title)}`,
+      url: directUrl
+        ? new URL(directUrl, SITE).href
+        : slug
+          ? `${SITE}/item/${slug}`
+          : `${SITE}/buy?search=${encodeURIComponent(lot.title)}`,
       price: toNumber(lot.current_price ?? lot.min_bid_price ?? lot.price ?? lot.buy_now_price),
       currency: 'USD',
       listingType,
@@ -105,6 +117,12 @@ export function createGoldinSource() {
         }
         if (sniffed.length > 0) {
           saveDebug('goldin', `lots-${listingType}`, JSON.stringify(sniffed[0].json).slice(0, 20000), 'json');
+        }
+        // Every URL a search fallback => no slug field matched. Print the
+        // first lot's actual keys so the field name is one debug run away.
+        if (out.length > 0 && out.every((l) => l.url.includes('/buy?search='))) {
+          const firstLots = sniffed[0]?.json?.searchalgolia?.lots ?? sniffed[0]?.json?.lots ?? [];
+          if (firstLots[0]) debugLog('goldin', `no slug field found — lot keys: ${Object.keys(firstLots[0]).join(', ')}`);
         }
         return out;
       };

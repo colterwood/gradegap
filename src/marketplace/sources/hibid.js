@@ -1,15 +1,28 @@
-// HiBid Canada (canada.hibid.com) — aggregator over dozens of Canadian
-// auction houses. All lot data comes from a GraphQL endpoint; Cloudflare
-// wants a browser-grade client, so the adapter opens the Canada portal in
-// the shared browser once and POSTs the captured LotSearch operation from
-// inside the page (same-origin — CF cookies ride along automatically).
-// Lots are CAD or USD per auction house (currencyAbbreviation).
+// HiBid (hibid.com) — aggregator over thousands of auction houses, US and
+// Canadian alike (canada.hibid.com is a country-filtered portal over the
+// SAME lot pool, so one global search covers both — per user, both sides
+// matter). All lot data comes from a GraphQL endpoint; Cloudflare wants a
+// browser-grade client, so the adapter opens the site in the shared
+// browser once and POSTs the captured LotSearch operation from inside the
+// page (same-origin — CF cookies ride along automatically). Lots are CAD
+// or USD per auction house (currencyAbbreviation).
 // Verify locally with `npm run test-source hibid "psa 10 jordan"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
 import { gotoStable } from './util.js';
 
-const SITE = 'https://canada.hibid.com';
+const SITE = 'https://hibid.com';
+
+// HiBid lot links are /lot/<itemId>/<slugified-lead> (user-verified live).
+// Their slugifier turns EVERY non-alphanumeric character into a dash
+// without collapsing runs ("NAT. VIP" -> "nat--vip"); the id does the
+// routing, the slug is cosmetic, but match their shape anyway.
+export const hibidSlug = (lead) =>
+  String(lead ?? '')
+    .toLowerCase()
+    .replace(/[#'"’]/g, '') // stripped outright ("VIP #6" -> "vip-6")
+    .replace(/[^a-z0-9]/g, '-')
+    .replace(/^-+|-+$/g, '');
 
 // Captured verbatim from HiBid's frontend (public client interceptions);
 // countAsView:false keeps our polling out of their view counters.
@@ -48,7 +61,7 @@ export function parseHibidResults(results) {
       listingId: String(lot.itemId),
       canonicalKey: `hibid:${lot.itemId}`,
       title: lot.lead,
-      url: `${SITE}/lot/${lot.itemId}`,
+      url: `${SITE}/lot/${lot.itemId}/${hibidSlug(lot.lead)}`,
       price: highBid > 0 ? highBid : minBid > 0 ? minBid : null,
       currency: lot.auction?.currencyAbbreviation ?? 'CAD',
       listingType: 'auction',
@@ -88,7 +101,7 @@ export function createHibidSource() {
                 operationName: 'LotSearch',
                 variables: {
                   searchText,
-                  countryName: 'Canada',
+                  countryName: null, // ALL of HiBid — US and Canadian houses alike
                   status: 'OPEN',
                   isArchive: false,
                   countAsView: false,

@@ -83,7 +83,7 @@ test('hibid: maps lots, prefers highBid, drops closed, carries house currency', 
   assert.equal(out[0].price, 3200);
   assert.equal(out[0].currency, 'CAD');
   assert.equal(out[0].seller, 'Small Town Auctions');
-  assert.match(out[0].url, /\/lot\/111$/);
+  assert.equal(out[0].url, 'https://hibid.com/lot/111/1979-opc-wayne-gretzky-rc-psa-5');
 });
 
 test('cia: parses AuctionWorx browse sections', () => {
@@ -604,4 +604,28 @@ test('alt: only responses whose REQUEST carried the query count as results', asy
   assert.ok(!requestCarriesQuery(ts, '', 'jordan psa'));
   // partial match is not enough
   assert.ok(!requestCarriesQuery(ts, '{"q":"jordan"}', 'jordan psa'));
+});
+
+test('hibid: links follow /lot/<id>/<slug> on hibid.com, slugified their way', async () => {
+  const { hibidSlug } = await import('../src/marketplace/sources/hibid.js');
+  // User-verified live link: hibid.com/lot/312530147/2007-upper-deck-michael-jordan-nat--vip-6-psa-10
+  assert.equal(hibidSlug('2007 UPPER DECK MICHAEL JORDAN NAT. VIP #6 PSA 10'), '2007-upper-deck-michael-jordan-nat--vip-6-psa-10');
+  const out = parseHibidResults([
+    { itemId: 312530147, lead: '2007 UPPER DECK MICHAEL JORDAN NAT. VIP #6 PSA 10', lotState: { highBid: 10, isClosed: false }, auction: {} },
+  ]);
+  assert.equal(out[0].url, 'https://hibid.com/lot/312530147/2007-upper-deck-michael-jordan-nat--vip-6-psa-10');
+});
+
+test('goldin: a payload slug or URL beats the search fallback', async () => {
+  const { parseGoldinLots } = await import('../src/marketplace/sources/goldin.js');
+  const [withSlug, withUrl, without] = parseGoldinLots({
+    lots: [
+      { lot_id: 1, title: '1986 Fleer Michael Jordan #57 BGS 8', slug: '1986-87-fleer-57-michael-jordan-bgs-nm-mt-89p99a' },
+      { lot_id: 2, title: 'Card two here', item_url: 'https://goldin.co/item/card-two-ab12cd' },
+      { lot_id: 3, title: 'Card three here' },
+    ],
+  }, null);
+  assert.equal(withSlug.url, 'https://goldin.co/item/1986-87-fleer-57-michael-jordan-bgs-nm-mt-89p99a');
+  assert.equal(withUrl.url, 'https://goldin.co/item/card-two-ab12cd');
+  assert.match(without.url, /\/buy\?search=/);
 });
