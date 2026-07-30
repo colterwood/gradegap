@@ -546,3 +546,45 @@ test('fanatics: URLs come from the payload, else a search link (never a 404 gues
   assert.match(hit.url, /^https:\/\/www\.fanaticscollect\.com\/search\?query=/);
   assert.match(hit.url, /Michael/);
 });
+
+test('alt: Typesense hit wrappers are unwrapped (the live parse failure)', async () => {
+  const { extractAltListings } = await import('../src/marketplace/sources/alt.js');
+  // Real Typesense multi_search shape: results[].hits[].document
+  const payload = {
+    results: [
+      {
+        found: 2,
+        hits: [
+          {
+            document: {
+              id: 'ast_1',
+              name: '1986 Fleer Michael Jordan #57 PSA 8',
+              lowestAsk: 1250000,
+              gradingCompany: 'PSA',
+              grade: '8',
+              auctionHouse: 'Alt',
+            },
+            highlights: [{ field: 'name' }],
+            text_match: 578730123,
+          },
+          {
+            document: {
+              id: 'ast_2',
+              name: '1998 Skybox Molten Metal Michael Jordan #41 PSA 9',
+              gradingCompany: 'PSA',
+              grade: '9',
+              // no recognizable price field — card fields keep it
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const groups = extractAltListings(payload);
+  const listings = groups.flat();
+  assert.equal(listings.length, 2);
+  assert.equal(listings[0].price, 12500); // cents normalized
+  assert.match(listings[0].title, /Michael Jordan #57 PSA 8/);
+  assert.equal(listings[1].price, null); // kept on card fields alone
+  assert.match(listings[1].title, /Molten Metal/);
+});

@@ -11,6 +11,10 @@ import { toNumber, saveDebug, debugLog, gotoStable, parkPage } from './util.js';
 
 const SITE = 'https://alt.xyz';
 
+// Alt's search runs on Typesense (seen in its own request log): the
+// production_universal_search and prod_asset collections.
+const SEARCH_BACKEND_RE = /typesense\.net|\/multi_search|algolia|\/search/i;
+
 // The homepage search bar reads "Search by name or cert #".
 const SEARCH_INPUTS = [
   'input[placeholder*="Search by name" i]',
@@ -27,13 +31,18 @@ const PRICE_KEYS = [
   'currentBid', 'current_bid', 'buyNowPrice', 'buy_now_price', 'amount', 'lowestAsk', 'lowest_ask',
 ];
 
+// Alt searches through Typesense, which wraps every result as
+// { document: {...}, highlights: [...] } — the card fields live one level
+// down, so unwrap before testing an array's items.
+const unwrapHit = (o) => (o && typeof o.document === 'object' && o.document ? o.document : o);
+
 export function extractAltListings(node, depth = 0, out = []) {
   if (!node || depth > 6) return out;
   if (Array.isArray(node)) {
-    const objs = node.filter((x) => x && typeof x === 'object' && !Array.isArray(x));
-    if (objs.length >= 2) {
+    const objs = node.filter((x) => x && typeof x === 'object' && !Array.isArray(x)).map(unwrapHit);
+    if (objs.length >= 1) {
       const mapped = objs.map(mapAltListing).filter(Boolean);
-      if (mapped.length >= 2) out.push(mapped);
+      if (mapped.length >= 1) out.push(mapped);
     }
     for (const item of node) extractAltListings(item, depth + 1, out);
     return out;
@@ -90,8 +99,16 @@ export function mapAltListing(o) {
       break;
     }
   }
-  // No price at all => not a listing (date ranges, surveys, config blobs).
-  if (price == null) return null;
+  // A price proves it's a listing. Failing that, accept explicit card
+  // fields (a Typesense document names the grade/grader/cert), which keeps
+  // real cards whose price field we don't recognize. Anything with neither
+  // is config/analytics noise.
+  const CARD_FIELDS = [
+    'grade', 'gradingCompany', 'grader', 'certNumber', 'cert', 'certificationNumber',
+    'playerName', 'player', 'setName', 'cardNumber', 'sport', 'year',
+  ];
+  const hasCardFields = CARD_FIELDS.some((k) => o[k] != null && o[k] !== '');
+  if (price == null && !hasCardFields) return null;
   const isAuction = /auction/i.test(String(o.listingType ?? o.type ?? o.saleType ?? ''));
   const ends = o.endsAt ?? o.endTime ?? o.auctionEndsAt ?? o.closesAt ?? null;
   const slug = o.slug ?? id;
@@ -201,8 +218,12 @@ export function createAltSource() {
       await box.click().catch(() => {});
       await box.fill(text);
       await box.press('Enter').catch(() => {});
-      // Results are client-rendered; wait for the search response to land.
-      for (let i = 0; i < 10 && sniffed.length === 0; i++) await page.waitForTimeout(1000);
+      // Wait for the SEARCH backend specifically (Alt queries Typesense) —
+      // exiting on the first JSON of any kind would race the results, since
+      // GraphQL/analytics chatter lands first.
+      for (let i = 0; i < 12 && !sniffed.some((s) => SEARCH_BACKEND_RE.test(s.url)); i++) {
+        await page.waitForTimeout(1000);
+      }
       await page.waitForTimeout(2500); // let the full result payload arrive
 
       // The URL the site itself navigated to is the real search route.
@@ -219,7 +240,18 @@ export function createAltSource() {
           }
         }
       }
-      debugLog('alt', `parsed ${out.length} (sniffed ${sniffed.length} JSON responses)`);
+      const backendHits = sniffed
+        .filter((s) => SEARCH_BACKEND_RE.test(s.url))
+        .map((s) => {
+          const found = (s.json?.results ?? []).reduce((n, r) => n + (r?.hits?.length ?? 0), 0);
+          return `${new URL(s.url).hostname} → ${found} hits`;
+        });
+      debugLog(
+        'alt',
+        `parsed ${out.length} (sniffed ${sniffed.length} JSON responses; search backend: ${
+          backendHits.join(', ') || 'none seen'
+        })`
+      );
       if (out.length > 0) {
         saveDebug('alt', 'api-sample', JSON.stringify(sniffed.slice(0, 2), null, 2).slice(0, 20000), 'json');
         // mapAltListing already drops other auction houses' items, so the
