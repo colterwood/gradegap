@@ -90,13 +90,16 @@ export function decodeEntities(s) {
 
 export const debugEnabled = () => process.env.WATCH_DEBUG === '1';
 
+let debugSeq = 0;
+
 export function saveDebug(source, kind, content, ext = 'txt') {
   if (!debugEnabled()) return null;
   try {
     const dir = path.join(config.capturesDir, 'source-debug');
     mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const file = path.join(dir, `${source}-${kind}-${stamp}.${ext}`);
+    // Sequence suffix: several saves can land in the same millisecond.
+    const file = path.join(dir, `${source}-${kind}-${stamp}-${++debugSeq}.${ext}`);
     writeFileSync(file, content);
     console.log(`  [debug] saved ${file}`);
     return file;
