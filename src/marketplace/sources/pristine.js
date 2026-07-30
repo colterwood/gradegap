@@ -54,7 +54,11 @@ export function mapPristineApiLot(o) {
     listingId: String(id),
     canonicalKey: `pristine:${id}`,
     title: String(title),
-    url: urlish ? new URL(urlish, SITE).href : `${SITE}/auction/item/${id}`,
+    // Payload URL when given; otherwise a search link for the title — that
+    // route is live-verified, a guessed /auction/item/<id> pattern is not.
+    url: urlish
+      ? new URL(urlish, SITE).href
+      : `${SITE}/auction/search/?q=${encodeURIComponent(String(title).slice(0, 120))}`,
     price,
     currency: 'USD',
     listingType: 'auction',

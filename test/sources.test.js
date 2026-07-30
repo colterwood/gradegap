@@ -395,7 +395,9 @@ test('alt: listing objects map tolerantly; cents-scale prices normalize', async 
   });
   assert.equal(fixed.price, 12500);
   assert.equal(fixed.listingType, 'fixed');
-  assert.match(fixed.url, /^https:\/\/alt\.xyz\/marketplace\/jordan-57-psa-8$/);
+  // /itm/<id> is Alt's real item route (user-verified live; the guessed
+  // /marketplace/<id> bounced to the homepage).
+  assert.match(fixed.url, /^https:\/\/alt\.xyz\/itm\/a1$/);
 
   const auction = mapAltListing({
     listingId: 'a2',

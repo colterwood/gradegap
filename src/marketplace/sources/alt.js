@@ -122,12 +122,13 @@ export function mapAltListing(o) {
   if (price == null && !hasCardFields) return null;
   const isAuction = /auction/i.test(String(o.listingType ?? o.type ?? o.saleType ?? ''));
   const ends = o.endsAt ?? o.endTime ?? o.auctionEndsAt ?? o.closesAt ?? null;
-  const slug = o.slug ?? id;
   return {
     listingId: String(id),
     canonicalKey: `alt:${id}`,
     title,
-    url: typeof o.url === 'string' ? new URL(o.url, SITE).href : `${SITE}/marketplace/${slug}`,
+    // /itm/<uuid> is the real item route — user-verified against the live
+    // site (the /marketplace/<id> guess bounced to the homepage).
+    url: typeof o.url === 'string' ? new URL(o.url, SITE).href : `${SITE}/itm/${id}`,
     price,
     currency: o.currency ?? 'USD',
     listingType: isAuction ? 'auction' : 'fixed',
