@@ -18,7 +18,7 @@ import { parseClassicCatalog } from '../src/marketplace/sources/classic.js';
 import { extractViewVars, parseMillerLots } from '../src/marketplace/sources/miller.js';
 import { extractGoldinConfig, parseGoldinLots } from '../src/marketplace/sources/goldin.js';
 import { parseCatawikiLots } from '../src/marketplace/sources/catawiki.js';
-import { parsePristineJsonLd } from '../src/marketplace/sources/pristine.js';
+import { parsePristineJsonLd, extractLotArrays, mapPristineApiLot } from '../src/marketplace/sources/pristine.js';
 import { extractJsonLd, decodeEntities, withTimeout } from '../src/marketplace/sources/util.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -266,6 +266,31 @@ test('cia: data-listingid on non-section elements still parses', () => {
   assert.equal(out.length, 1);
   assert.equal(out[0].listingId, '777');
   assert.equal(out[0].price, 900);
+});
+
+test('pristine: sniffed JSON payloads yield lots wherever the array hides', () => {
+  // Algolia-style envelope: results[0].hits[]
+  const payload = {
+    results: [{
+      hits: [
+        { objectID: '123456', name: '1986 Fleer Michael Jordan #57 PSA 10', current_bid: 4100, end_time: 1785540000 },
+        { objectID: '123457', name: '1991 Upper Deck Michael Jordan #44 PSA 10', current_bid: 55 },
+        { objectID: '123458', name: '1989 Hoops Michael Jordan #200 PSA 9', current_bid: 20 },
+      ],
+      nbHits: 3,
+    }],
+  };
+  const arrays = extractLotArrays(payload);
+  assert.ok(arrays.length >= 1);
+  const lots = arrays[0].map(mapPristineApiLot).filter(Boolean);
+  assert.equal(lots.length, 3);
+  assert.equal(lots[0].listingId, '123456');
+  assert.equal(lots[0].price, 4100);
+  assert.match(lots[0].endsAt, /^20\d\d-.*Z$/); // seconds epoch → ISO
+  assert.match(lots[0].url, /^https:\/\/www\.pristineauction\.com\//);
+
+  // arrays without titles are ignored
+  assert.equal(extractLotArrays({ data: [{ id: 1 }, { id: 2 }, { id: 3 }] }).length, 0);
 });
 
 test('pristine: parses Product JSON-LD, including ItemList wrappers', () => {
