@@ -76,7 +76,7 @@
     </div>
     <div class="control">
       <label for="min-diff">Min $ Diff ($)</label>
-      <input type="number" id="min-diff" min="0" step="50" value="0" title="Only show cards whose grader↔PSA gap is at least this many dollars" />
+      <input type="number" id="min-diff" min="0" step="50" value="200" title="Only show cards whose grader↔PSA gap is at least this many dollars" />
     </div>
     <div class="control">
       <label for="min-pct-diff">Min % Diff</label>
@@ -85,6 +85,11 @@
     <div class="control">
       <label for="player">Player</label>
       <select id="player"><option value="">All players</option></select>
+    </div>
+    <div class="control">
+      <label for="search">Search</label>
+      <input type="text" id="search" placeholder="e.g. Jordan Fleer"
+             title="Show only rows whose card or player name contains every word typed" />
     </div>
   </section>
 
@@ -193,14 +198,16 @@
       <table id="matches-table">
         <thead>
           <tr>
-            <th>Site</th>
-            <th>Listing</th>
-            <th>Watched card</th>
-            <th class="num" title="Card Ladder value for that card at the watched grade">CL Value</th>
-            <th class="num">Price (USD)</th>
-            <th>Type</th>
-            <th title="Auction end time (UTC) and time remaining">Ends</th>
-            <th class="num" title="How closely the listing title matches the card">Match</th>
+            <th class="dot-col sortable" data-col="deal" title="Deal — red: price above CL value; green: below CL, Buy It Now; yellow: below CL, auction — click to sort"><span class="hcell"><span class="arrow"></span></span></th>
+            <th class="sortable" data-col="source"><span class="hcell">Site<span class="arrow"></span></span></th>
+            <th class="sortable" data-col="title"><span class="hcell">Listing<span class="arrow"></span></span></th>
+            <th class="sortable" data-col="card_name"><span class="hcell">Watched card<span class="arrow"></span></span></th>
+            <th class="num sortable" data-col="price_usd"><span class="hcell">Price (USD)<span class="arrow"></span></span></th>
+            <th class="num sortable" data-col="cl_value" title="Card Ladder value for that card at the watched grade"><span class="hcell">CL Value<span class="arrow"></span></span></th>
+            <th class="num sortable" data-col="psa10_value" title="Card Ladder PSA 10 value for the watched card"><span class="hcell">PSA 10<span class="arrow"></span></span></th>
+            <th class="sortable" data-col="listing_type"><span class="hcell">Type<span class="arrow"></span></span></th>
+            <th class="sortable" data-col="ends_at" title="Auction end time (UTC) and time remaining"><span class="hcell">Ends<span class="arrow"></span></span></th>
+            <th class="num sortable" data-col="match_score" title="How closely the listing title matches the card"><span class="hcell">Match<span class="arrow"></span></span></th>
             <th></th>
           </tr>
         </thead>

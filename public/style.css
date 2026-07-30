@@ -97,7 +97,7 @@ button.secondary { background: var(--panel); color: var(--accent); }
 }
 .toggle button.active { background: var(--accent); color: #fff; }
 
-select, input[type="number"] {
+select, input[type="number"], .controls input[type="text"] {
   font: inherit;
   padding: 7px 10px;
   border: 1px solid var(--line);

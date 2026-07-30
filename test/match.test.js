@@ -125,6 +125,39 @@ test('penalties: reprint and a second same-grader grade drag the score down', ()
   assert.ok(lot.debug.penalties.some((p) => p.startsWith('slab:SGC 8')));
 });
 
+test('variant words in the title but not the watch drag the score down', () => {
+  // A base-card watch must not 100%-match a parallel of the same card.
+  const base = scoreListing(luka, '2018-19 Panini Prizm Luka Doncic #280 PSA 10');
+  const refractor = scoreListing(luka, '2018-19 Panini Prizm Luka Doncic #280 Silver PSA 10');
+  assert.ok(base.score >= 0.9);
+  assert.ok(refractor.score <= base.score - 0.3, `score ${refractor.score}`);
+  assert.ok(refractor.debug.penalties.includes('variant:silver'));
+
+  // A watch that itself names the parallel is exempt from the penalty.
+  const silverWatch = { ...luka, parallel: 'Silver' };
+  const exact = scoreListing(silverWatch, '2018-19 Panini Prizm Luka Doncic #280 Silver PSA 10');
+  assert.ok(exact.debug.penalties.length === 0);
+  assert.ok(exact.score >= 0.9);
+});
+
+test('manual watch: "vs" battle cards and parallels are penalized too', () => {
+  const galactus = { description: '1990 Marvel Galactus', company: 'PSA', grade: '10' };
+  const vs = scoreListing(galactus, '1990 Marvel Fantastic Four vs Galactus PSA 10');
+  assert.equal(vs.ok, true);
+  assert.ok(vs.score <= 0.65, `score ${vs.score}`);
+  assert.ok(vs.debug.penalties.includes('variant:vs'));
+
+  // A description that contains "vs" itself is exempt.
+  const battle = { description: 'Fantastic Four vs Galactus', company: 'PSA', grade: '10' };
+  const hit = scoreListing(battle, '1990 Marvel Fantastic Four vs Galactus PSA 10');
+  assert.equal(hit.score, 1);
+
+  const brady = { description: '2000 Bowman Chrome Tom Brady', company: 'PSA', grade: '10' };
+  const refr = scoreListing(brady, '2000 Bowman Chrome Tom Brady Refractor PSA 10');
+  assert.ok(refr.score <= 0.65, `score ${refr.score}`);
+  assert.ok(refr.debug.penalties.includes('variant:refractor'));
+});
+
 test('parallel tokens count when the watch has one', () => {
   const silver = { ...luka, parallel: 'Silver' };
   const withPar = scoreListing(silver, '2018-19 Panini Prizm Silver Luka Doncic #280 PSA 10');

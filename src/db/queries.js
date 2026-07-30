@@ -284,13 +284,16 @@ export function makeQueries(db) {
     listMatches: db.prepare(`
       SELECT l.*, w.grading_company, w.grade, w.card_id,
              COALESCE(c.name, w.description) AS card_name, p.name AS player_name,
-             gp.cl_value AS cl_value
+             gp.cl_value AS cl_value,
+             gp10.cl_value AS psa10_value
       FROM listings l
       JOIN watches w ON w.id = l.watch_id
       LEFT JOIN cards c ON c.id = w.card_id
       LEFT JOIN players p ON p.id = c.player_id
       LEFT JOIN grade_prices gp
         ON gp.card_id = w.card_id AND gp.grading_company = w.grading_company AND gp.grade = w.grade
+      LEFT JOIN grade_prices gp10
+        ON gp10.card_id = w.card_id AND gp10.grading_company = '${BASELINE_COMPANY}' AND gp10.grade = '10'
       WHERE (@watchId IS NULL OR l.watch_id = @watchId)
         AND instr(@statuses, '|' || l.status || '|') > 0
       ORDER BY l.found_at DESC, l.id DESC

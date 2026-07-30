@@ -142,6 +142,22 @@ const BAD_WORDS_RE = /\b(reprints?|replicas?|customs?|prox(?:y|ies)|digital|nove
 const badWords = (raw) =>
   new Set([...raw.matchAll(BAD_WORDS_RE)].map((m) => m[1].replace(/ies$/, 'y').replace(/s$/, '')));
 
+// Scoring only checks that the WATCH's words appear in the title, so extra
+// title words are free — which let a base "2000 Bowman Chrome" watch score
+// 100% against a "... Refractor" listing, and "Galactus" against "Fantastic
+// Four vs Galactus". These words, when the title has them but the watched
+// identity doesn't, mark a different card (a parallel, or a "vs" battle
+// card); each one found costs 0.35. A watch that itself contains the word
+// (a Silver-parallel watch, a "... vs ..." description) is exempt.
+const VARIANT_WORDS = [
+  'refractor', 'refractors', 'xfractor', 'foil', 'prizm', 'holo', 'atomic',
+  'sapphire', 'shimmer', 'wave', 'mojo', 'sparkle', 'cracked', 'ice',
+  'gold', 'silver', 'sepia', 'camo', 'vs',
+];
+
+const variantWords = (titleTokens, targetTokens) =>
+  VARIANT_WORDS.filter((w) => titleTokens.has(w) && !targetTokens.has(w));
+
 // --- scoring ---------------------------------------------------------------
 
 // target: a catalog watch
@@ -175,6 +191,10 @@ export function scoreListing(target, title) {
     for (const w of badWords(raw)) {
       score -= 0.4;
       penalties.push(`word:${w}`);
+    }
+    for (const w of variantWords(tokens, new Set(want))) {
+      score -= 0.35;
+      penalties.push(`variant:${w}`);
     }
     return { ok: true, score: Math.max(0, Math.min(1, score)), debug: { matched, missing, penalties } };
   }
@@ -248,6 +268,13 @@ export function scoreListing(target, title) {
   for (const w of badWords(raw)) {
     score -= 0.4;
     penalties.push(`word:${w}`);
+  }
+  const identityTokens = new Set(
+    [target.year, target.setName, target.playerName, target.cardNumber, target.parallel].flatMap(tokenize)
+  );
+  for (const w of variantWords(tokens, identityTokens)) {
+    score -= 0.35;
+    penalties.push(`variant:${w}`);
   }
 
   score = Math.max(0, Math.min(1, score));

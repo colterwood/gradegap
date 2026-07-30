@@ -2,8 +2,9 @@ const state = {
   basis: 'cl_value',
   direction: 'all',
   maxPrice: 0, // 0 = no cap
-  minDiff: 0,
+  minDiff: 200, // matches the input's default value in index.html
   minPctDiff: 15, // matches the input's default value in index.html
+  search: '', // client-side card/player name filter
   playerId: '',
   sortColumn: 'abs_diff', // default: biggest dollar gaps first
   sortDir: 'desc',
@@ -144,8 +145,13 @@ function sortValue(row, column) {
 
 function renderResults() {
   const active = new Set(Object.entries(state.colors).filter(([, v]) => v).map(([k]) => k));
+  const terms = state.search.toLowerCase().split(/\s+/).filter(Boolean);
   const rows = currentRows.filter((r) => {
     if (!active.has(r._dot.color)) return false;
+    if (terms.length > 0) {
+      const hay = `${r.name ?? ''} ${r.player_name ?? ''}`.toLowerCase();
+      if (!terms.every((t) => hay.includes(t))) return false;
+    }
     if (state.watchFilter === 'watched') return isWatched(r);
     if (state.watchFilter === 'unwatched') return !isWatched(r);
     return true;
@@ -203,6 +209,8 @@ function renderResults() {
       emptyEl.textContent = 'Select a grade to compare.';
     } else if (!Object.values(state.graders).some(Boolean)) {
       emptyEl.textContent = 'Select at least one grader to compare against PSA.';
+    } else if (currentRows.length > 0 && state.search) {
+      emptyEl.textContent = 'No rows match the search.';
     } else if (currentRows.length > 0 && state.watchFilter !== 'all') {
       emptyEl.textContent = `No ${state.watchFilter} rows under the current filters.`;
     } else if (currentRows.length > 0) {
@@ -214,7 +222,7 @@ function renderResults() {
     }
   }
 
-  updateSortArrows();
+  updateSortArrows('results', state.sortColumn, state.sortDir);
 
   const bits = [];
   if (rows.length !== lastMeta.total) bits.push(`${rows.length} of ${lastMeta.total} cards`);
@@ -224,12 +232,12 @@ function renderResults() {
   $('summary').textContent = bits.join(' · ');
 }
 
-function updateSortArrows() {
-  for (const th of document.querySelectorAll('#results th.sortable')) {
+function updateSortArrows(tableId, sortCol, sortDir) {
+  for (const th of document.querySelectorAll(`#${tableId} th.sortable`)) {
     const arrow = th.querySelector('.arrow');
-    if (th.dataset.col === state.sortColumn) {
+    if (th.dataset.col === sortCol) {
       th.classList.add('sorted');
-      arrow.textContent = state.sortDir === 'asc' ? ' ▲' : ' ▼';
+      arrow.textContent = sortDir === 'asc' ? ' ▲' : ' ▼';
     } else {
       th.classList.remove('sorted');
       arrow.textContent = '';
@@ -450,6 +458,16 @@ $('player').addEventListener('change', (e) => {
   loadResults().catch((err) => setError(err.message));
 });
 
+// Search filters the already-loaded rows client-side — no refetch needed.
+let searchDebounce = null;
+$('search').addEventListener('input', (e) => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => {
+    state.search = e.target.value.trim();
+    renderResults();
+  }, 200);
+});
+
 $('sync-btn').addEventListener('click', () => triggerSync(false));
 $('resume-btn').addEventListener('click', () => triggerSync(true));
 $('cancel-btn').addEventListener('click', () => api('/api/sync/cancel', { method: 'POST' }).catch(() => {}));
@@ -459,6 +477,11 @@ $('cancel-btn').addEventListener('click', () => api('/api/sync/cancel', { method
 let currentView = 'disparity';
 let checkPollTimer = null;
 let checkWasRunning = false;
+
+// Listings-tab sort state + the last-fetched rows (so header clicks re-sort
+// without refetching). col null = the server's newest-first order.
+let listingSort = { col: null, dir: 'asc' };
+let currentMatches = [];
 
 async function loadWatches() {
   const watches = await api('/api/watches');
@@ -561,12 +584,58 @@ function renderWatches(watches) {
   $('watches-empty').hidden = watches.length > 0;
 }
 
+// Deal dot: how the asking price sits against the watched grade's CL value.
+// red = already over CL; green = under CL and buyable now; yellow = under CL
+// but an auction (the price can still climb); gray = nothing to compare.
+function dealDot(m) {
+  const price = m.price_usd ?? m.price;
+  const cl = m.cl_value;
+  if (price == null || cl == null) {
+    return { color: 'gray', rank: 3, title: 'No CL value to compare against' };
+  }
+  if (price > cl) {
+    return { color: 'red', rank: 2, title: `Price ${fmtMoney(price)} is above the ${fmtMoney(cl)} CL value` };
+  }
+  if (m.listing_type === 'auction') {
+    return { color: 'yellow', rank: 1, title: `Bid ${fmtMoney(price)} is under the ${fmtMoney(cl)} CL value, but it's an auction` };
+  }
+  return { color: 'green', rank: 0, title: `Price ${fmtMoney(price)} is under the ${fmtMoney(cl)} CL value — Buy It Now` };
+}
+
+function matchSortValue(m, col) {
+  switch (col) {
+    case 'deal': return m._deal.rank;
+    case 'price_usd': return m.price_usd ?? m.price;
+    case 'ends_at': return m.listing_type === 'auction' ? m.ends_at || null : null; // SQL dates sort lexically
+    case 'source': case 'listing_type': return m[col] || '';
+    case 'title': return (m.title || '').toLowerCase();
+    case 'card_name': return watchLabel(m).toLowerCase();
+    default: return m[col]; // cl_value, psa10_value, match_score
+  }
+}
+
 function renderMatches(all) {
+  for (const m of all) m._deal = dealDot(m);
   // "Hide low-confidence" hides sub-50% scores from view (they stay in the
   // DB and reappear if unchecked).
   const matches = $('hide-low').checked
     ? all.filter((m) => m.match_score == null || m.match_score >= 0.5)
-    : all;
+    : [...all];
+
+  if (listingSort.col) {
+    const dir = listingSort.dir === 'asc' ? 1 : -1;
+    matches.sort((a, b) => {
+      const av = matchSortValue(a, listingSort.col);
+      const bv = matchSortValue(b, listingSort.col);
+      // nulls (no price, no end time, no CL value) go to the bottom either way
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string') return av.localeCompare(bv) * dir;
+      return (av - bv) * dir;
+    });
+  }
+
   const tbody = document.querySelector('#matches-table tbody');
   tbody.innerHTML = '';
   for (const m of matches) {
@@ -581,11 +650,13 @@ function renderMatches(all) {
       ? `<span class="date">${esc(m.ends_at)}</span><br /><span class="time-left">${fmtTimeLeft(m.ends_at)}</span>`
       : '—';
     tr.innerHTML = `
+      <td class="dot-cell"><span class="dot dot-${m._deal.color}" title="${esc(m._deal.title)}"></span></td>
       <td><span class="source-badge">${esc(m.source)}</span></td>
       <td class="listing-title">${title}${m.seller ? `<div class="seller">${esc(m.seller)}</div>` : ''}</td>
       <td class="watch-ref">${esc(watchLabel(m))}</td>
-      <td class="num cl-value">${fmtMoney(m.cl_value)}</td>
       <td class="num">${fmtMoney(m.price_usd ?? m.price)}${m.currency && m.currency !== 'USD' ? `<div class="native-price">${esc(String(m.price))} ${esc(m.currency)}</div>` : ''}</td>
+      <td class="num cl-value">${fmtMoney(m.cl_value)}</td>
+      <td class="num cl-value">${fmtMoney(m.psa10_value)}</td>
       <td>${m.listing_type === 'auction' ? 'Auction' : 'Buy It Now'}</td>
       <td>${ends}</td>
       <td class="num">${low ? `<span class="score-low" title="Low-confidence match — verify before trusting">${score}</span>` : score}</td>
@@ -593,6 +664,8 @@ function renderMatches(all) {
     `;
     tbody.appendChild(tr);
   }
+
+  updateSortArrows('matches-table', listingSort.col, listingSort.dir);
   $('matches-table').hidden = matches.length === 0;
   const empty = $('matches-empty');
   empty.hidden = matches.length > 0;
@@ -675,9 +748,22 @@ $('add-watch').addEventListener('submit', async (e) => {
 
 async function loadListingsView() {
   const statuses = $('show-ended').checked ? 'new,notified,dismissed,ended' : 'new,notified';
-  const matches = await api(`/api/matches?status=${statuses}`);
-  renderMatches(matches);
+  currentMatches = await api(`/api/matches?status=${statuses}`);
+  renderMatches(currentMatches);
   await refreshWatchBadge();
+}
+
+// Click a Listings column header to sort, same behavior as the disparity table.
+for (const th of document.querySelectorAll('#matches-table th.sortable')) {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (listingSort.col === col) {
+      listingSort.dir = listingSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      listingSort = { col, dir: 'asc' };
+    }
+    renderMatches(currentMatches);
+  });
 }
 
 document.querySelector('#watches-table tbody').addEventListener('change', async (e) => {
