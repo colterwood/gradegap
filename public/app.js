@@ -482,9 +482,9 @@ function switchView(view) {
   }
   $('view-disparity').hidden = view !== 'disparity';
   $('view-watched').hidden = view !== 'watched';
-  if (view === 'watched') {
-    loadWatchedView().catch((err) => setError(err.message));
-  }
+  $('view-listings').hidden = view !== 'listings';
+  if (view === 'watched') loadWatchedView().catch((err) => setError(err.message));
+  if (view === 'listings') loadListingsView().catch((err) => setError(err.message));
 }
 
 document.querySelector('.tabs').addEventListener('click', (e) => {
@@ -533,7 +533,12 @@ function renderWatches(watches) {
   $('watches-empty').hidden = watches.length > 0;
 }
 
-function renderMatches(matches) {
+function renderMatches(all) {
+  // "Hide low-confidence" hides sub-50% scores from view (they stay in the
+  // DB and reappear if unchecked).
+  const matches = $('hide-low').checked
+    ? all.filter((m) => m.match_score == null || m.match_score >= 0.5)
+    : all;
   const tbody = document.querySelector('#matches-table tbody');
   tbody.innerHTML = '';
   for (const m of matches) {
@@ -566,17 +571,23 @@ function renderMatches(matches) {
     empty.textContent = 'No listings matched yet — hit Check now, or wait for the next scheduled check.';
   }
   const live = matches.filter((m) => m.status === 'new' || m.status === 'notified').length;
+  const hidden = all.length - matches.length;
   $('matches-summary').textContent = `${live} live listing${live === 1 ? '' : 's'}` +
-    (matches.length !== live ? ` · ${matches.length - live} ended/dismissed shown` : '');
+    (matches.length !== live ? ` · ${matches.length - live} ended/dismissed shown` : '') +
+    (hidden > 0 ? ` · ${hidden} low-confidence hidden` : '');
 }
 
 async function loadWatchedView() {
   const watches = await loadWatches();
+  await refreshCheckStatus();
+  return watches;
+}
+
+async function loadListingsView() {
   const statuses = $('show-ended').checked ? 'new,notified,dismissed,ended' : 'new,notified';
   const matches = await api(`/api/matches?status=${statuses}`);
   renderMatches(matches);
-  await refreshCheckStatus();
-  return watches;
+  await refreshWatchBadge();
 }
 
 document.querySelector('#watches-table tbody').addEventListener('change', async (e) => {
@@ -619,14 +630,14 @@ document.querySelector('#matches-table tbody').addEventListener('click', async (
   if (!btn) return;
   try {
     await api(`/api/matches/${btn.dataset.id}/dismiss`, { method: 'POST' });
-    await loadWatchedView();
-    await refreshWatchBadge();
+    await loadListingsView();
   } catch (err) {
     setError(err.message);
   }
 });
 
-$('show-ended').addEventListener('change', () => loadWatchedView().catch((err) => setError(err.message)));
+$('show-ended').addEventListener('change', () => loadListingsView().catch((err) => setError(err.message)));
+$('hide-low').addEventListener('change', () => loadListingsView().catch((err) => setError(err.message)));
 
 // --- check-now + status ---
 
@@ -662,7 +673,8 @@ async function refreshCheckStatus() {
   if (checkWasRunning && !s.running) {
     clearInterval(checkPollTimer);
     checkPollTimer = null;
-    await loadWatchedView().catch(() => {});
+    await loadWatches().catch(() => {});
+    if (currentView === 'listings') await loadListingsView().catch(() => {});
   }
   checkWasRunning = s.running;
   return s;
@@ -717,6 +729,7 @@ $('check-cancel-btn').addEventListener('click', () => api('/api/watch-check/canc
       (currentView === 'watched' ? refreshCheckStatus() : refreshWatchBadge()).catch(() => {});
     }, 30000);
     if (location.hash === '#watched') switchView('watched');
+    if (location.hash === '#listings') switchView('listings');
   } catch (err) {
     setError(err.message);
   }

@@ -199,7 +199,8 @@ td.watch-cell input { cursor: pointer; }
 #watches-table { margin-bottom: 24px; }
 #watches-table input[type="number"] { min-width: 90px; width: 90px; padding: 4px 8px; }
 
-.matches-head { margin-top: 4px; }
+.matches-head { margin-top: 4px; padding-top: 14px; }
+.listing-filters { display: inline-flex; gap: 18px; }
 .show-ended { color: var(--muted); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 
 .source-badge {

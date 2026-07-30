@@ -76,8 +76,9 @@ const ANY_SLAB_RE = new RegExp(
   'gi'
 );
 
-// Words that mean "this is not the real slab you watched".
-const BAD_WORDS = ['reprint', 'replica', 'custom', 'proxy', 'digital', 'novelty', 'lot', 'break'];
+// Words that mean "this is not the real slab you watched" (plural-tolerant:
+// "Fleer Reprints" must trip the reprint penalty).
+const BAD_WORDS_RE = /\b(reprints?|replicas?|customs?|prox(?:y|ies)|digital|novelty|lots?|breaks?)\b/g;
 
 // --- scoring ---------------------------------------------------------------
 
@@ -106,6 +107,15 @@ export function scoreListing(target, title) {
     matched.push(`slab:${target.company} ${target.grade}`);
   } else {
     missing.push(`slab:${target.company} ${target.grade}`);
+  }
+  // Set name is a hard requirement too (when the card has one): at least one
+  // significant set token must appear, or "1997 Kobe SGC 9" matches every
+  // 1997 Kobe SGC 9 on the site regardless of set (live-verified failure
+  // mode). Partial matches ("Prizm" for "Panini Prizm") still pass — the
+  // fuzzy score below grades how completely the set matched.
+  const setTokens = tokenize(target.setName ?? '');
+  if (setTokens.length > 0 && !setTokens.some((t) => tokens.has(t))) {
+    missing.push(`set:${setTokens.join(' ')}`);
   }
   if (missing.length > 0) {
     return { ok: false, score: 0, debug: { matched, missing, penalties } };
@@ -153,11 +163,12 @@ export function scoreListing(target, title) {
       penalties.push(`slab:${company} ${grade}`);
     }
   }
-  for (const w of BAD_WORDS) {
-    if (tokens.has(w)) {
-      score -= 0.4;
-      penalties.push(`word:${w}`);
-    }
+  const badWords = new Set(
+    [...raw.matchAll(BAD_WORDS_RE)].map((x) => x[1].replace(/ies$/, 'y').replace(/s$/, ''))
+  );
+  for (const w of badWords) {
+    score -= 0.4;
+    penalties.push(`word:${w}`);
   }
 
   score = Math.max(0, Math.min(1, score));

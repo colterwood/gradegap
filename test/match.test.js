@@ -78,11 +78,33 @@ test('hard requirements: wrong grader, wrong grade, wrong player, wrong year all
   }
 });
 
-test('missing set/number lowers score but keeps the listing (low-confidence)', () => {
+test('a title with NONE of the set tokens is discarded (wrong-set false positives)', () => {
+  // Live failure mode: "1997 Kobe SGC 9" matched every 1997 Kobe SGC 9 on
+  // COMC regardless of set. Set-token presence is now a hard requirement.
   const r = scoreListing(jordan, '1986 Michael Jordan rookie SGC 10');
-  assert.equal(r.ok, true);
-  assert.ok(r.score < 0.5, `score ${r.score}`);
+  assert.equal(r.ok, false);
   assert.ok(r.debug.missing.some((m) => m.startsWith('set:')));
+
+  const wrongSet = scoreListing(
+    { ...luka, setName: 'Prizm' },
+    '2018-19 Panini Select Luka Doncic #25 PSA 10'
+  );
+  assert.equal(wrongSet.ok, false);
+});
+
+test('partial set match passes the gate but lowers the score', () => {
+  const target = { ...luka, setName: 'Panini Prizm' };
+  const partial = scoreListing(target, '2018-19 Prizm Luka Doncic #280 PSA 10');
+  assert.equal(partial.ok, true);
+  const full = scoreListing(target, '2018-19 Panini Prizm Luka Doncic #280 PSA 10');
+  assert.ok(full.score > partial.score);
+});
+
+test('plural junk words still trip the penalty (Fleer Reprints at 69% was the bug)', () => {
+  const r = scoreListing(jordan, '1997-00 23KT Gold Card Fleer Reprints Michael Jordan 1986-87 SGC 10');
+  assert.equal(r.ok, true); // fleer matches the set gate
+  assert.ok(r.debug.penalties.includes('word:reprint'));
+  assert.ok(r.score < 0.5, `score ${r.score}`);
 });
 
 test('penalties: reprint and a second same-grader grade drag the score down', () => {

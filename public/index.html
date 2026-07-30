@@ -30,7 +30,8 @@
 
   <nav class="tabs">
     <button class="tab active" data-view="disparity">Disparity</button>
-    <button class="tab" data-view="watched">Watched <span id="watched-badge" class="badge" hidden></span></button>
+    <button class="tab" data-view="watched">Watched</button>
+    <button class="tab" data-view="listings">Listings <span id="watched-badge" class="badge" hidden></span></button>
   </nav>
 
   <div id="view-disparity">
@@ -145,10 +146,17 @@
       <p id="watches-empty" class="empty" hidden>
         No watched cards yet — tick the <strong>Watch</strong> box on a row in the Disparity tab.
       </p>
+    </main>
+  </div>
 
+  <div id="view-listings" hidden>
+    <main>
       <div class="summary-row matches-head">
         <p class="summary" id="matches-summary"></p>
-        <label class="show-ended"><input type="checkbox" id="show-ended" /> Show ended &amp; dismissed</label>
+        <span class="listing-filters">
+          <label class="show-ended"><input type="checkbox" id="hide-low" checked /> Hide low-confidence (&lt;50%)</label>
+          <label class="show-ended"><input type="checkbox" id="show-ended" /> Show ended &amp; dismissed</label>
+        </span>
       </div>
       <table id="matches-table">
         <thead>

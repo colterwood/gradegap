@@ -106,13 +106,15 @@ npm start          # → http://localhost:4000, click Sync when you want fresh d
 
 Tick the **Watch** box on any row of the results table and GradeGap will hunt
 live marketplaces for that exact card + slab (e.g. "1986 Fleer Jordan #57
-SGC 10") on a schedule, while the app is running. Everything found lands in
-the **Watched** tab: which site, current price (shown in USD; other
+SGC 10") on a schedule, while the app is running. The **Watched** tab manages
+your watches (max price, pause, delete, Check now); everything found lands in
+the **Listings** tab: which site, current price (shown in USD; other
 currencies converted at daily rates), auction vs Buy It Now, and — for
 auctions — the end time with a live countdown. Each listing carries a match
-confidence score: titles that fail the hard checks (year, player, exact
-grader+grade) are discarded outright, everything else is kept and low
-scorers are highlighted so *you* make the final call (Dismiss clears them).
+confidence score: titles that fail the hard checks (year, player, set,
+exact grader+grade) are discarded outright, everything else is scored and
+sub-50% matches are hidden behind a toggle so *you* make the final call
+(Dismiss clears one for good).
 
 - **Checking cadence**: every `WATCH_INTERVAL_MIN` minutes (default 30)
   while the server runs, plus a **Check now** button. Set `0` for
