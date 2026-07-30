@@ -49,7 +49,9 @@ test('fanatics: auction vs fixed, cents → dollars, end time', () => {
   assert.equal(auction.listingType, 'auction');
   assert.equal(auction.price, 45000);
   assert.equal(auction.endsAt, '2026-08-01T02:00:00Z');
-  assert.match(auction.url, /\/listing\/1986-fleer-jordan$/);
+  // No payload URL field here, so it falls back to a site search link
+  // (a constructed /listing/<id> link 404s — verified live).
+  assert.match(auction.url, /^https:\/\/www\.fanaticscollect\.com\/search\?query=/);
 
   const fixed = parseFanaticsListing({
     id: 'def',
@@ -518,4 +520,29 @@ test('alt: near-miss diagnostic surfaces rejected card-ish objects and their key
   assert.equal(misses.length, 1);
   assert.match(misses[0].sampleTitle, /Michael Jordan/);
   assert.ok(misses[0].keys.includes('itemTitle') && misses[0].keys.includes('lowestOffer'));
+});
+
+test('fanatics: URLs come from the payload, else a search link (never a 404 guess)', async () => {
+  const { buildFanaticsUrl, parseFanaticsAlgoliaHit } = await import('../src/marketplace/sources/fanatics.js');
+
+  // A URL the API actually gave us wins
+  assert.equal(
+    buildFanaticsUrl({ url: 'https://www.fanaticscollect.com/weekly-auction/x_123' }),
+    'https://www.fanaticscollect.com/weekly-auction/x_123'
+  );
+  assert.equal(
+    buildFanaticsUrl({ path: '/weekly-auction/x_123' }),
+    'https://www.fanaticscollect.com/weekly-auction/x_123'
+  );
+
+  // Live bug: /listing/<uuid> 404s, so a bare uuid must NOT become a link
+  const hit = parseFanaticsAlgoliaHit({
+    listingUuid: 'a741a966-8b92-11f1-9b47-02ffd3767c89',
+    title: '1986 Fleer Michael Jordan #57 PSA 8',
+    marketplace: 'FIXED',
+    buyNowPrice: 500,
+  });
+  assert.ok(!hit.url.includes('a741a966'), 'no constructed /listing/<uuid> link');
+  assert.match(hit.url, /^https:\/\/www\.fanaticscollect\.com\/search\?query=/);
+  assert.match(hit.url, /Michael/);
 });

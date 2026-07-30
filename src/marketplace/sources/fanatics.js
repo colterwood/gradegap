@@ -40,6 +40,24 @@ async function gql(query, variables = {}) {
 
 const AUCTION_RE = /WEEKLY|PREMIER|AUCTION/i;
 
+// Fanatics' own listing-URL shape isn't documented and a constructed
+// /listing/<uuid> link 404s (verified live). So: use a URL the payload
+// actually gives us, and otherwise link to a site search for the title —
+// a link that always resolves beats a deep link that doesn't.
+export function buildFanaticsUrl(node) {
+  const direct =
+    node.url ?? node.webUrl ?? node.permalink ?? node.canonicalUrl ?? node.href ?? node.path ?? null;
+  if (typeof direct === 'string' && direct.trim()) {
+    try {
+      return new URL(direct, SITE).href;
+    } catch {
+      /* fall through */
+    }
+  }
+  const title = node.title ?? node.name ?? '';
+  return `${SITE}/search?query=${encodeURIComponent(String(title).slice(0, 120))}`;
+}
+
 const epochToIso = (v) => {
   const n = toNumber(v);
   if (n == null) return typeof v === 'string' ? v : null;
@@ -80,7 +98,7 @@ export function parseFanaticsAlgoliaHit(hit) {
     listingId: String(id),
     canonicalKey: `fanatics:${id}`,
     title: String(title),
-    url: `${SITE}/listing/${hit.slug ?? id}`,
+    url: buildFanaticsUrl(hit),
     price,
     currency: hit.currency ?? 'USD',
     listingType: isAuction ? 'auction' : 'fixed',
@@ -150,7 +168,7 @@ export function parseFanaticsListing(node) {
     listingId: String(node.id),
     canonicalKey: `fanatics:${node.id}`,
     title: [node.title, node.subtitle].filter(Boolean).join(' '),
-    url: `${SITE}/listing/${node.slug ?? node.id}`,
+    url: buildFanaticsUrl(node),
     price: centsToDollars(money?.amountInCents),
     currency: money?.currency ?? 'USD',
     listingType: isAuction ? 'auction' : 'fixed',

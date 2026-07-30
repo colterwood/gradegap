@@ -71,6 +71,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
           currency: raw.currency ?? 'USD',
           priceUsd,
           endsAt: toSqlDate(raw.endsAt),
+          url: raw.url ?? null,
         });
       } else {
         if (watch.max_price != null && priceUsd != null && priceUsd > watch.max_price) continue;

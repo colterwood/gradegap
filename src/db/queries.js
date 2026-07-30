@@ -269,10 +269,13 @@ export function makeQueries(db) {
       VALUES (@watchId, @source, @listingId, @canonicalKey, @title, @url, @price, @currency,
               @priceUsd, @listingType, @endsAt, @imageUrl, @seller, @matchScore, @matchDebug)
     `),
-    // A re-sighting refreshes the live fields and resets the staleness counter.
+    // A re-sighting refreshes the live fields and resets the staleness
+    // counter. url is refreshed too, so rows stored before an adapter's
+    // link format was corrected get repaired on the next check.
     refreshListing: db.prepare(`
       UPDATE listings SET title = @title, price = @price, currency = @currency, price_usd = @priceUsd,
-        ends_at = COALESCE(@endsAt, ends_at), misses = 0, last_seen_at = datetime('now')
+        ends_at = COALESCE(@endsAt, ends_at), url = COALESCE(@url, url),
+        misses = 0, last_seen_at = datetime('now')
       WHERE id = @id
     `),
     // cl_value = the Card Ladder value for the watched card at that exact
