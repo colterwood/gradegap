@@ -502,3 +502,20 @@ test('alt: only Alt-listed items are kept, not the houses it aggregates', async 
     assert.equal(isAltsOwnListing({ auctionHouse: house }), false, house);
   }
 });
+
+test('alt: near-miss diagnostic surfaces rejected card-ish objects and their keys', async () => {
+  const { findNearMisses } = await import('../src/marketplace/sources/alt.js');
+  const payload = {
+    data: {
+      items: [
+        // card-shaped title but no recognizable price -> a near miss
+        { itemTitle: '1986 Fleer Michael Jordan #57 PSA 8', lowestOffer: { cents: 1250000 } },
+        { name: 'Auction seller CSAT' }, // not card-shaped, ignored
+      ],
+    },
+  };
+  const misses = findNearMisses(payload);
+  assert.equal(misses.length, 1);
+  assert.match(misses[0].sampleTitle, /Michael Jordan/);
+  assert.ok(misses[0].keys.includes('itemTitle') && misses[0].keys.includes('lowestOffer'));
+});

@@ -11,6 +11,7 @@
     "start": "node src/server.js",
     "mock": "node src/server.js --mock",
     "login": "node scripts/login.js",
+    "login-site": "node scripts/loginSite.js",
     "discover": "node scripts/discover.js",
     "test-source": "node scripts/testSource.js",
     "doctor": "node scripts/doctor.js",

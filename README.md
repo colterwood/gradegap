@@ -151,6 +151,10 @@ sub-50% matches are hidden behind a toggle so *you* make the final call
     aggregator — dozens of Canadian houses in one source, **including HCE
     Auctions**), `heritage`, `myslabs`, `pristine`, `goldin`, `alt`,
     `catawiki` (EU).
+  - **Sites that want an account**: `npm run login-site -- alt.xyz` opens
+    the shared browser profile so you can sign in by hand; the session is
+    saved in `./profile` and every later check reuses it (same mechanism as
+    `npm run login` for Card Ladder).
   - **Verify before enabling**: scraped sites weren't reachable from the
     development environment, so each scraped adapter is best-effort until
     proven against the live site *from your machine*:

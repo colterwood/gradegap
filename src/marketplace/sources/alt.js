@@ -101,10 +101,32 @@ export function mapAltListing(o) {
   };
 }
 
+// Diagnostic: objects that LOOK like cards but failed a requirement. When a
+// search comes back empty this reveals the real field names (or proves no
+// card data arrived at all).
+export function findNearMisses(node, out = [], depth = 0) {
+  if (!node || depth > 6 || out.length >= 3) return out;
+  if (Array.isArray(node)) {
+    for (const item of node) findNearMisses(item, out, depth + 1);
+    return out;
+  }
+  if (typeof node === 'object') {
+    const titled = Object.entries(node).find(
+      ([, v]) => typeof v === 'string' && v.length >= 10 && CARD_TITLE_RE.test(v)
+    );
+    if (titled && !mapAltListing(node)) {
+      out.push({ sampleTitle: titled[1].slice(0, 80), keys: Object.keys(node).slice(0, 25) });
+    }
+    for (const v of Object.values(node)) findNearMisses(v, out, depth + 1);
+  }
+  return out;
+}
+
 export function createAltSource() {
   let lease = null;
   let page = null;
   let sniffed = [];
+  let requestLog = [];
 
   return {
     name: 'alt',
@@ -114,6 +136,14 @@ export function createAltSource() {
     async start() {
       lease = await acquireBrowser();
       page = await lease.context.newPage();
+      // Every XHR/fetch, whether or not we can parse it — if a search
+      // request exists at all, it shows up here.
+      page.on('request', (req) => {
+        const type = req.resourceType();
+        if (type === 'xhr' || type === 'fetch') requestLog.push(`${req.method()} ${req.url()}`);
+      });
+      page.on('websocket', (ws) => requestLog.push(`WS ${ws.url()}`));
+
       page.on('response', async (res) => {
         try {
           const url = res.url();
@@ -151,6 +181,7 @@ export function createAltSource() {
       for (const url of candidates) {
         await parkPage(page);
         sniffed = [];
+        requestLog = [];
         const res = await gotoStable(page, url).catch(() => undefined);
         if (res === undefined) continue;
         const status = res === null ? 200 : res.status();
@@ -179,9 +210,22 @@ export function createAltSource() {
         }
       }
 
-      // Nothing card-shaped: record which of Alt's own endpoints answered,
-      // so the next pass can target the right one.
-      debugLog('alt', `no card listings; Alt endpoints seen:\n    ${sniffed.map((s) => s.url).join('\n    ')}`);
+      // Nothing card-shaped. Report the full request log (a missing search
+      // call means the page never searched — login wall or wrong route),
+      // plus any near-miss objects (which reveal the real field names).
+      debugLog('alt', `no card listings. All XHR/fetch on the last attempt:\n    ${requestLog.join('\n    ') || '(none)'}`);
+      const nearMisses = sniffed.flatMap((s) => findNearMisses(s.json)).slice(0, 3);
+      if (nearMisses.length) {
+        debugLog(
+          'alt',
+          `card-ish objects that were rejected:\n${nearMisses
+            .map((n) => `    "${n.sampleTitle}"\n      keys: ${n.keys.join(', ')}`)
+            .join('\n')}`
+        );
+      } else {
+        debugLog('alt', 'no card-shaped text in any sniffed payload — the page returned no listings');
+      }
+      debugLog('alt', `page title: ${await page.title().catch(() => '?')}`);
       saveDebug('alt', 'page', await page.content().catch(() => ''), 'html');
       const shot = await page.screenshot().catch(() => null);
       if (shot) saveDebug('alt', 'screenshot', shot, 'png');
