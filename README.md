@@ -120,10 +120,12 @@ sub-50% matches are hidden behind a toggle so *you* make the final call
   while the server runs, plus a **Check now** button. Set `0` for
   manual-only.
 - **Phone pushes** (optional): install the [ntfy](https://ntfy.sh) app,
-  subscribe to a long random topic name, and set `NTFY_TOPIC` in `.env`.
-  You get one aggregate push per check when new listings appear ("7 new
-  listings for your GradeGap watchlist") and one reminder when watched
-  auctions enter their last `WATCH_REMIND_MIN` minutes (default 24h).
+  subscribe to a **long random** topic name (the name is the only secret —
+  anyone who guesses it can read your alerts), set `NTFY_TOPIC` in `.env`,
+  and confirm with `npm run test-notify`. You get one aggregate push per
+  check when new listings appear ("7 new listings for your GradeGap
+  watchlist") and one reminder when watched auctions enter their last
+  `WATCH_REMIND_MIN` minutes (default 24h).
 - **Sources** (`WATCH_SOURCES`): each marketplace is a small adapter under
   `src/marketplace/sources/`. Shipping today:
   - **No browser needed**: `ebay` (official Browse API across the US/CA/UK/
@@ -263,8 +265,12 @@ EBAY_MARKETPLACES=EBAY_US,EBAY_CA,EBAY_GB,EBAY_DE,EBAY_FR,EBAY_IT
 # SHOPIFY_SHOPS=flipcollect.com:CAD,www.mintink.ca:CAD,overtimesportscards.ca:CAD
 SHOPIFY_SHOPS=
 
-# Phone pushes via ntfy.sh: install the ntfy app, subscribe to a long random
-# private topic name, put it here. Empty = pushes disabled.
+# Phone pushes via ntfy.sh: install the ntfy app, subscribe to a topic, put
+# the same name here, then verify with `npm run test-notify`.
+# SECURITY: ntfy topics have no password — the name IS the secret. Anyone who
+# knows or guesses it can read your alerts and send you fake ones, so use a
+# long random name (e.g. gradegap-7f3a9c21e845b06d), never a guessable one.
+# Empty = pushes disabled.
 NTFY_TOPIC=
 NTFY_SERVER=https://ntfy.sh
 ```

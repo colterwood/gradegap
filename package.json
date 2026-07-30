@@ -14,6 +14,7 @@
     "discover": "node scripts/discover.js",
     "test-source": "node scripts/testSource.js",
     "doctor": "node scripts/doctor.js",
+    "test-notify": "node scripts/testNotify.js",
     "test": "node --test"
   },
   "dependencies": {
