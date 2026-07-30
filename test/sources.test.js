@@ -418,3 +418,36 @@ test('alt: listing objects map tolerantly; cents-scale prices normalize', async 
   assert.equal(groups.length, 1);
   assert.equal(groups[0].length, 2);
 });
+
+test('woocommerce: HTML fallback parses product links and prices', async () => {
+  const { parseWooHtml } = await import('../src/marketplace/sources/woocommerce.js');
+  const html = `
+    <li class="product">
+      <a href="https://galaxy-auctions.com/product/gretzky-rc-psa-5/">
+        <img src="https://galaxy-auctions.com/img/g.jpg">
+        <h2>1979-80 O-Pee-Chee Wayne Gretzky #18 RC PSA 5</h2>
+      </a>
+      <span class="woocommerce-Price-amount amount"><bdi><span>$</span>12,500.00</bdi></span>
+    </li>
+    <li class="product">
+      <a href="https://galaxy-auctions.com/product/howe-psa-4/">1951 Parkhurst Gordie Howe RC PSA 4</a>
+    </li>`;
+  const out = parseWooHtml(html, { domain: 'galaxy-auctions.com', currency: 'CAD' });
+  assert.equal(out.length, 2);
+  assert.match(out[0].title, /Wayne Gretzky #18 RC PSA 5/);
+  assert.equal(out[0].price, 12500);
+  assert.equal(out[0].listingId, 'galaxy-auctions.com:gretzky-rc-psa-5');
+  assert.equal(out[1].listingId, 'galaxy-auctions.com:howe-psa-4');
+});
+
+test('alt: analytics/config objects without prices are rejected', async () => {
+  const { mapAltListing } = await import('../src/marketplace/sources/alt.js');
+  // Real false positives from a live run
+  assert.equal(mapAltListing({ id: 3237, title: 'Jul 17 - Jul 30, 2026' }), null);
+  assert.equal(mapAltListing({ id: 'x', name: 'Shipping Label – Cash Advance Non-Users' }), null);
+  assert.equal(mapAltListing({ id: 'y', name: 'Auction seller CSAT' }), null);
+  // A card with a price still passes
+  assert.ok(mapAltListing({ id: 'z', title: '1986 Fleer Michael Jordan #57 PSA 8', price: 12500 }));
+  // …but a card-shaped title with no price does not
+  assert.equal(mapAltListing({ id: 'w', title: '1986 Fleer Michael Jordan #57 PSA 8' }), null);
+});

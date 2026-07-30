@@ -8,7 +8,7 @@
 // ("12500" + currency_minor_unit 2 = $125.00).
 
 import { config } from '../../config.js';
-import { fetchWithTimeout, decodeEntities, debugLog } from './util.js';
+import { fetchWithTimeout, fetchHtml, decodeEntities, debugLog, saveDebug, toNumber, absUrl } from './util.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -36,6 +36,35 @@ export function parseWooProducts(products, { domain, currency }) {
   return out;
 }
 
+// Fallback for shops without the Store API: WordPress product search is
+// server-rendered, and Woo themes emit product links + a woocommerce-Price
+// amount per card.
+export function parseWooHtml(html, { domain, currency }) {
+  const out = new Map();
+  const re = /<a[^>]+href=["'](https?:\/\/[^"']*\/product\/([^"'/?#]+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  for (const m of html.matchAll(re)) {
+    const [, url, slug, inner] = m;
+    const title = decodeEntities(inner.replace(/<[^>]+>/g, ' '));
+    if (!title || title.length < 8 || out.has(slug)) continue;
+    const tail = html.slice(m.index, m.index + 1500);
+    const priceText = tail.match(/woocommerce-Price-amount[^>]*>[\s\S]{0,80}?([\d.,]+)/i)?.[1]
+      ?? tail.match(/[$C]\s?([\d,]+(?:\.\d{2})?)/)?.[1];
+    out.set(slug, {
+      listingId: `${domain}:${slug}`,
+      canonicalKey: null,
+      title,
+      url: absUrl(url, `https://${domain}`),
+      price: toNumber(priceText),
+      currency,
+      listingType: 'fixed',
+      endsAt: null,
+      imageUrl: tail.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1] ?? null,
+      seller: domain,
+    });
+  }
+  return [...out.values()];
+}
+
 export async function searchWooShop({ domain, currency = 'CAD' }, text) {
   const params = new URLSearchParams({ search: text, per_page: '20' });
   const res = await fetchWithTimeout(`https://${domain}/wp-json/wc/store/v1/products?${params}`, {
@@ -43,8 +72,23 @@ export async function searchWooShop({ domain, currency = 'CAD' }, text) {
     timeoutMs: 15_000,
   });
   if (res.status === 429) throw Object.assign(new Error(`${domain} rate limited (429)`), { rateLimited: true });
-  if (!res.ok) throw new Error(`${domain} Store API HTTP ${res.status} (not a public WooCommerce store?)`);
-  return parseWooProducts(await res.json(), { domain, currency });
+
+  if (res.ok) {
+    const body = await res.json().catch(() => null);
+    const products = Array.isArray(body) ? body : [];
+    const mapped = parseWooProducts(products, { domain, currency });
+    debugLog('woocommerce', `${domain} Store API → HTTP ${res.status}, ${products.length} products, ${mapped.length} mapped`);
+    if (mapped.length > 0) return mapped;
+  } else {
+    debugLog('woocommerce', `${domain} Store API → HTTP ${res.status}; falling back to product search page`);
+  }
+
+  // Store API missing/empty — try the storefront's own search.
+  const html = await fetchHtml(`https://${domain}/?s=${encodeURIComponent(text)}&post_type=product`);
+  const fromHtml = parseWooHtml(html, { domain, currency });
+  debugLog('woocommerce', `${domain} HTML search → ${fromHtml.length} products (${html.length}b)`);
+  if (fromHtml.length === 0) saveDebug('woocommerce', domain.replace(/\W+/g, '-'), html, 'html');
+  return fromHtml;
 }
 
 export function createWooSource() {

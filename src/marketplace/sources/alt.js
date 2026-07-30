@@ -35,6 +35,11 @@ export function extractAltListings(node, depth = 0, out = []) {
   return out;
 }
 
+// A card listing always has a price and a card-shaped title. Live testing
+// showed the naive "object with an id and a name" test also swallowing
+// auction-cycle date ranges and analytics survey definitions.
+const CARD_TITLE_RE = /\b(19|20)\d{2}\b|\b(psa|bgs|sgc|cgc|csg)\b|#\s*\w+/i;
+
 // Pure, fixture-testable: one Alt API object → normalized listing or null.
 export function mapAltListing(o) {
   if (!o || typeof o !== 'object') return null;
@@ -42,6 +47,7 @@ export function mapAltListing(o) {
   const title =
     o.title ?? o.name ?? o.cardName ?? o.card_name ?? o.displayName ?? o.description ?? null;
   if (id == null || typeof title !== 'string' || title.length < 8) return null;
+  if (!CARD_TITLE_RE.test(title)) return null;
 
   let price = null;
   for (const k of PRICE_KEYS) {
@@ -53,6 +59,8 @@ export function mapAltListing(o) {
       break;
     }
   }
+  // No price at all => not a listing (date ranges, surveys, config blobs).
+  if (price == null) return null;
   const isAuction = /auction/i.test(String(o.listingType ?? o.type ?? o.saleType ?? ''));
   const ends = o.endsAt ?? o.endTime ?? o.auctionEndsAt ?? o.closesAt ?? null;
   const slug = o.slug ?? id;
@@ -86,13 +94,17 @@ export function createAltSource() {
       page = await lease.context.newPage();
       page.on('response', async (res) => {
         try {
+          const url = res.url();
+          // Alt's own hosts only — third-party analytics (PostHog, Segment…)
+          // ship object arrays that look listing-ish but aren't.
+          if (!/(^|\.)(alt\.xyz|onlyalt\.com)$/i.test(new URL(url).hostname)) return;
           const ct = res.headers()['content-type'] ?? '';
           if (!ct.includes('json')) return;
           const body = await res.text().catch(() => '');
           if (!body || (body[0] !== '{' && body[0] !== '[')) return;
-          sniffed.push({ url: res.url(), json: JSON.parse(body) });
+          sniffed.push({ url, json: JSON.parse(body) });
         } catch {
-          // aborted/detached — ignore
+          // aborted/detached/bad URL — ignore
         }
       });
     },
@@ -132,10 +144,13 @@ export function createAltSource() {
         }
       }
 
+      // Nothing card-shaped: record which of Alt's own endpoints answered,
+      // so the next pass can target the right one.
+      debugLog('alt', `no card listings; Alt endpoints seen:\n    ${sniffed.map((s) => s.url).join('\n    ')}`);
       saveDebug('alt', 'page', await page.content().catch(() => ''), 'html');
       const shot = await page.screenshot().catch(() => null);
       if (shot) saveDebug('alt', 'screenshot', shot, 'png');
-      for (const { url: apiUrl, json } of sniffed.slice(0, 5)) {
+      for (const { url: apiUrl, json } of sniffed.slice(0, 8)) {
         saveDebug('alt', 'sniffed-json', `${apiUrl}\n${JSON.stringify(json).slice(0, 8000)}`, 'txt');
       }
       return [];
