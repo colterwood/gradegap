@@ -11,6 +11,15 @@ import { toNumber, saveDebug, debugLog, gotoStable, parkPage } from './util.js';
 
 const SITE = 'https://alt.xyz';
 
+// The homepage search bar reads "Search by name or cert #".
+const SEARCH_INPUTS = [
+  'input[placeholder*="Search by name" i]',
+  'input[placeholder*="cert" i]',
+  'input[type="search"]',
+  'input[name="search"]',
+  'input[placeholder*="search" i]',
+];
+
 // Does this object look like a card listing? Alt's payloads vary, so key
 // on "has a title-ish string AND an id AND something price-shaped".
 const PRICE_KEYS = [
@@ -165,49 +174,57 @@ export function createAltSource() {
     },
 
     async search({ text }) {
-      const q = encodeURIComponent(text);
-      // /browse with auctionHouse=Alt is the view of items listed ON Alt —
-      // the site also aggregates other houses' listings, which we don't
-      // want here (they're covered by their own adapters, or not at all).
-      // This one view spans both auction and fixed price; each listing's
-      // payload says which it is (see mapAltListing).
-      const candidates = [
-        `${SITE}/browse?auctionHouse=Alt&search=${q}&sortBy=ending_soonest_asc`,
-        `${SITE}/browse?auctionHouse=Alt&q=${q}`,
-        `${SITE}/browse?search=${q}`,
-        `${SITE}/buy?search=${q}`,
-      ];
+      // Alt's search has no deep link: navigating to /browse?search=… just
+      // renders the marketing homepage (verified from a live capture), so
+      // no search request ever fires. Drive the site's own search box
+      // instead — the way a person would.
+      await parkPage(page);
+      sniffed = [];
+      requestLog = [];
+      await gotoStable(page, `${SITE}/`);
+      await page.waitForTimeout(2000);
 
-      for (const url of candidates) {
-        await parkPage(page);
-        sniffed = [];
-        requestLog = [];
-        const res = await gotoStable(page, url).catch(() => undefined);
-        if (res === undefined) continue;
-        const status = res === null ? 200 : res.status();
-        if (status < 200 || status >= 400) {
-          debugLog('alt', `GET ${url} → ${status}`);
-          continue;
+      let box = null;
+      for (const sel of SEARCH_INPUTS) {
+        const candidate = page.locator(sel).first();
+        if (await candidate.isVisible().catch(() => false)) {
+          box = candidate;
+          debugLog('alt', `search input: ${sel}`);
+          break;
         }
-        for (let i = 0; i < 8 && sniffed.length === 0; i++) await page.waitForTimeout(1000);
-        await page.waitForTimeout(1500); // let a later, richer payload land
+      }
+      if (!box) {
+        saveDebug('alt', 'homepage', await page.content().catch(() => ''), 'html');
+        throw new Error('Alt: no search box on the homepage — run with --debug and send the capture');
+      }
 
-        const seen = new Set();
-        const out = [];
-        for (const { url: apiUrl, json } of sniffed) {
-          for (const group of extractAltListings(json)) {
-            if (group.length === 0) continue;
-            debugLog('alt', `listing-shaped JSON from ${apiUrl} → ${group.length}`);
-            for (const l of group) {
-              if (!seen.has(l.listingId) && seen.add(l.listingId)) out.push(l);
-            }
+      await box.click().catch(() => {});
+      await box.fill(text);
+      await box.press('Enter').catch(() => {});
+      // Results are client-rendered; wait for the search response to land.
+      for (let i = 0; i < 10 && sniffed.length === 0; i++) await page.waitForTimeout(1000);
+      await page.waitForTimeout(2500); // let the full result payload arrive
+
+      // The URL the site itself navigated to is the real search route.
+      debugLog('alt', `search landed on ${page.url()}`);
+
+      const seen = new Set();
+      const out = [];
+      for (const { url: apiUrl, json } of sniffed) {
+        for (const group of extractAltListings(json)) {
+          if (group.length === 0) continue;
+          debugLog('alt', `listing-shaped JSON from ${apiUrl} → ${group.length}`);
+          for (const l of group) {
+            if (!seen.has(l.listingId) && seen.add(l.listingId)) out.push(l);
           }
         }
-        debugLog('alt', `GET ${url} → ${status}, parsed ${out.length} (sniffed ${sniffed.length} JSON responses)`);
-        if (out.length > 0) {
-          saveDebug('alt', 'api-sample', JSON.stringify(sniffed.slice(0, 2), null, 2).slice(0, 20000), 'json');
-          return out;
-        }
+      }
+      debugLog('alt', `parsed ${out.length} (sniffed ${sniffed.length} JSON responses)`);
+      if (out.length > 0) {
+        saveDebug('alt', 'api-sample', JSON.stringify(sniffed.slice(0, 2), null, 2).slice(0, 20000), 'json');
+        // mapAltListing already drops other auction houses' items, so the
+        // side-bar "Alt" filter doesn't need clicking.
+        return out;
       }
 
       // Nothing card-shaped. Report the full request log (a missing search
