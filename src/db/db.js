@@ -10,13 +10,58 @@ export function openDb(dbPath = path.join(config.dataDir, 'gradegap.db')) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  // Table rebuilds run BEFORE schema.sql (whose indexes assume the new
+  // shape) and before foreign_keys is switched on.
+  migrateWatchesForManual(db);
   db.exec(readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   // Lightweight migrations: add columns to already-existing tables (CREATE
   // TABLE IF NOT EXISTS won't alter a table that predates a new column).
   ensureColumn(db, 'grade_prices', 'population', 'INTEGER');
   ensureColumn(db, 'grade_prices', 'num_sales', 'INTEGER');
+  db.pragma('foreign_keys = ON');
   return db;
+}
+
+// Manual watches have no Card Ladder card, so card_id had to lose its NOT
+// NULL and gain a description column. SQLite can't relax a column
+// constraint in place — the table is rebuilt and copied.
+function migrateWatchesForManual(db) {
+  const cols = db.prepare(`PRAGMA table_info(watches)`).all();
+  if (cols.length === 0) return; // fresh DB — schema.sql creates it correctly
+  const cardId = cols.find((c) => c.name === 'card_id');
+  const hasDescription = cols.some((c) => c.name === 'description');
+  if (hasDescription && cardId && cardId.notnull === 0) return; // already migrated
+
+  // listings.watch_id references watches, so the swap needs FK enforcement
+  // off — and PRAGMA foreign_keys is a no-op inside a transaction, hence
+  // outside the BEGIN.
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.exec(`
+    BEGIN;
+    CREATE TABLE watches_migrated (
+      id               INTEGER PRIMARY KEY,
+      card_id          INTEGER REFERENCES cards(id),
+      description      TEXT,
+      grading_company  TEXT NOT NULL,
+      grade            TEXT NOT NULL,
+      max_price        REAL,
+      enabled          INTEGER NOT NULL DEFAULT 1,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      last_checked_at  TEXT,
+      UNIQUE(card_id, grading_company, grade)
+    );
+    INSERT INTO watches_migrated
+      (id, card_id, grading_company, grade, max_price, enabled, created_at, last_checked_at)
+      SELECT id, card_id, grading_company, grade, max_price, enabled, created_at, last_checked_at
+      FROM watches;
+    DROP TABLE watches;
+    ALTER TABLE watches_migrated RENAME TO watches;
+    COMMIT;
+  `);
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
 }
 
 function ensureColumn(db, table, column, type) {

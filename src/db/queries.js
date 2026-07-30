@@ -218,23 +218,37 @@ export function makeQueries(db) {
       VALUES (@cardId, @gradingCompany, @grade, @maxPrice)
       ON CONFLICT(card_id, grading_company, grade) DO UPDATE SET enabled = 1
     `),
+    // Hand-added watch: no card behind it, just the typed description.
+    insertManualWatch: db.prepare(`
+      INSERT INTO watches (card_id, description, grading_company, grade, max_price)
+      VALUES (NULL, @description, @gradingCompany, @grade, @maxPrice)
+      ON CONFLICT(description, grading_company, grade) WHERE card_id IS NULL
+        DO UPDATE SET enabled = 1
+    `),
+    getManualWatchByKey: db.prepare(`
+      SELECT * FROM watches WHERE card_id IS NULL AND description = ? AND grading_company = ? AND grade = ?
+    `),
     getWatch: db.prepare(`SELECT * FROM watches WHERE id = ?`),
     getWatchByKey: db.prepare(`SELECT * FROM watches WHERE card_id = ? AND grading_company = ? AND grade = ?`),
-    // Card/player fields ride along for query building and the management UI.
+    // Card/player fields ride along for query building and the management UI;
+    // LEFT JOINs so manual (card-less) watches are included, with the typed
+    // description standing in for the card name.
     listWatches: db.prepare(`
-      SELECT w.*, c.name AS card_name, c.set_name, c.year, c.card_number, c.parallel,
+      SELECT w.*, COALESCE(c.name, w.description) AS card_name,
+             c.set_name, c.year, c.card_number, c.parallel,
              p.name AS player_name,
              (SELECT COUNT(*) FROM listings l WHERE l.watch_id = w.id AND l.status IN ('new','notified')) AS active_listings
       FROM watches w
-      JOIN cards c ON c.id = w.card_id
+      LEFT JOIN cards c ON c.id = w.card_id
       LEFT JOIN players p ON p.id = c.player_id
       ORDER BY w.id DESC
     `),
     listEnabledWatches: db.prepare(`
-      SELECT w.*, c.name AS card_name, c.set_name, c.year, c.card_number, c.parallel,
+      SELECT w.*, COALESCE(c.name, w.description) AS card_name,
+             c.set_name, c.year, c.card_number, c.parallel,
              p.name AS player_name
       FROM watches w
-      JOIN cards c ON c.id = w.card_id
+      LEFT JOIN cards c ON c.id = w.card_id
       LEFT JOIN players p ON p.id = c.player_id
       WHERE w.enabled = 1
       ORDER BY w.id
@@ -261,13 +275,19 @@ export function makeQueries(db) {
         ends_at = COALESCE(@endsAt, ends_at), misses = 0, last_seen_at = datetime('now')
       WHERE id = @id
     `),
+    // cl_value = the Card Ladder value for the watched card at that exact
+    // grader+grade, so a listing's asking price can be read against it.
+    // NULL for manual watches (no Ladder card behind them).
     listMatches: db.prepare(`
       SELECT l.*, w.grading_company, w.grade, w.card_id,
-             c.name AS card_name, p.name AS player_name
+             COALESCE(c.name, w.description) AS card_name, p.name AS player_name,
+             gp.cl_value AS cl_value
       FROM listings l
       JOIN watches w ON w.id = l.watch_id
-      JOIN cards c ON c.id = w.card_id
+      LEFT JOIN cards c ON c.id = w.card_id
       LEFT JOIN players p ON p.id = c.player_id
+      LEFT JOIN grade_prices gp
+        ON gp.card_id = w.card_id AND gp.grading_company = w.grading_company AND gp.grade = w.grade
       WHERE (@watchId IS NULL OR l.watch_id = @watchId)
         AND instr(@statuses, '|' || l.status || '|') > 0
       ORDER BY l.found_at DESC, l.id DESC

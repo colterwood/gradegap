@@ -34,6 +34,18 @@ export const COMPARE_GRADES = ['10', '9', '8', '7'];
 // grader plus the PSA baseline, per grade. Compare graders before PSA per
 // grade so their (smaller) universes and card-page links seed shared cards
 // first.
+// Vocabularies for hand-added watches (the Watched tab's add form). Wider
+// than the disparity comparison: any grader, half grades, Authentic, and
+// the ungraded pairing — 'None' grader <-> 'Raw' grade always travel
+// together and mean "must NOT be slabbed".
+export const MANUAL_GRADERS = ['Any', 'None', 'SGC', 'PSA', 'BGS'];
+export const MANUAL_GRADES = [
+  'Any', 'Raw',
+  '10', '9.5', '9', '8.5', '8', '7.5', '7', '6.5', '6', '5.5', '5',
+  '4.5', '4', '3.5', '3', '2.5', '2', '1.5', '1',
+  'Authentic',
+];
+
 export const CRAWL_CONDITIONS = COMPARE_GRADES.flatMap((g) => [
   ...COMPARE_GRADERS.map((c) => `${c} ${g}`),
   `${BASELINE_COMPANY} ${g}`,

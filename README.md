@@ -148,6 +148,16 @@ sub-50% matches are hidden behind a toggle so *you* make the final call
   above a USD price; the *On* toggle pauses a watch without losing its
   listing history; ✕ deletes the watch and its history (unticking the Watch
   box does the same).
+- **Watch anything by hand**: the form at the top of the Watched tab takes a
+  free-text description plus a grader (Any / None / SGC / PSA / BGS) and
+  grade (Any / Raw / 10 down to 1 in half steps / Authentic), so you can
+  track cards the Ladder doesn't cover. **Every word you type must appear in
+  a listing's title** — type fewer words to widen the net. *Any* grader
+  means any grading company; picking **None** or **Raw** pairs them
+  automatically and matches only cards that are *not* slabbed.
+- **Filter and sort by watch state**: the disparity table's Watch column
+  sorts like any other, and a Watch toggle (All / Watched / Unwatched)
+  narrows the view.
 - Mock mode (`npm run mock`) includes a fixture marketplace, so the whole
   watch → check → matches flow works with zero credentials.
 

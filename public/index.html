@@ -44,6 +44,14 @@
       </div>
     </div>
     <div class="control">
+      <label>Watch</label>
+      <div class="toggle" id="watch-filter">
+        <button data-value="all" class="active">All</button>
+        <button data-value="watched">Watched</button>
+        <button data-value="unwatched">Unwatched</button>
+      </div>
+    </div>
+    <div class="control">
       <label>Grade</label>
       <!-- Checkboxes are built by app.js from /api/config (COMPARE_GRADES). -->
       <div class="checks" id="grade-filter"></div>
@@ -93,7 +101,7 @@
     <table id="results">
       <thead>
         <tr>
-          <th class="watch-col" title="Watch this card + slab: marketplaces are scanned for it and new listings appear under Watched">Watch</th>
+          <th class="watch-col sortable" data-col="watch" data-type="num" title="Watch this card + slab: marketplaces are scanned for it and new listings appear under Listings — click to sort watched first"><span class="hcell">Watch<span class="arrow"></span></span></th>
           <th class="dot-col sortable" data-col="color" data-type="color" title="Liquidity — how recently each side last sold — click to sort"><span class="hcell"><span class="arrow"></span></span></th>
           <th class="sortable" data-col="name" data-type="text"><span class="hcell">Card<span class="arrow"></span></span></th>
           <th class="num sortable" data-col="grade" data-type="num"><span class="hcell">Grade<span class="arrow"></span></span></th>
@@ -128,6 +136,30 @@
       <div id="check-progress" class="progress progress-inline" hidden>
         <span id="check-progress-text"></span>
       </div>
+
+      <!-- Hand-add a watch for anything not in the disparity table. Grader
+           and Grade options come from /api/config. -->
+      <form id="add-watch" class="add-watch">
+        <div class="control grow">
+          <label for="new-desc">Description</label>
+          <input type="text" id="new-desc" placeholder="e.g. 1986 Fleer Michael Jordan #57"
+                 title="Every word you type must appear in a listing's title" />
+        </div>
+        <div class="control">
+          <label for="new-grader">Grader</label>
+          <select id="new-grader"></select>
+        </div>
+        <div class="control">
+          <label for="new-grade">Grade</label>
+          <select id="new-grade"></select>
+        </div>
+        <div class="control">
+          <label for="new-max-price">Max $</label>
+          <input type="number" id="new-max-price" min="0" step="50" placeholder="—"
+                 title="Skip listings above this USD price (blank = no cap)" />
+        </div>
+        <button type="submit" id="add-watch-btn">Add</button>
+      </form>
 
       <table id="watches-table">
         <thead>
@@ -164,6 +196,7 @@
             <th>Site</th>
             <th>Listing</th>
             <th>Watched card</th>
+            <th class="num" title="Card Ladder value for that card at the watched grade">CL Value</th>
             <th class="num">Price (USD)</th>
             <th>Type</th>
             <th title="Auction end time (UTC) and time remaining">Ends</th>

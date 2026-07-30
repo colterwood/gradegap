@@ -66,11 +66,15 @@ CREATE TABLE IF NOT EXISTS sync_items (
 
 -- ============ marketplace watcher ============
 
--- One row per watched (card, grading company, grade), flagged from the
--- disparity table. max_price is a USD cap on matched listings (NULL = none).
+-- One row per watched (card, grading company, grade). Two kinds:
+--   * flagged from the disparity table -> card_id set, description NULL
+--   * added by hand on the Watched tab -> card_id NULL, description = the
+--     typed text (every word of which must appear in a listing title)
+-- max_price is a USD cap on matched listings (NULL = none).
 CREATE TABLE IF NOT EXISTS watches (
   id               INTEGER PRIMARY KEY,
-  card_id          INTEGER NOT NULL REFERENCES cards(id),
+  card_id          INTEGER REFERENCES cards(id),
+  description      TEXT,
   grading_company  TEXT NOT NULL,
   grade            TEXT NOT NULL,
   max_price        REAL,
@@ -161,6 +165,10 @@ CREATE INDEX IF NOT EXISTS idx_grade_prices_card ON grade_prices(card_id);
 -- Serves the disparity query's driving scan (grading_company = X AND grade IN …).
 CREATE INDEX IF NOT EXISTS idx_grade_prices_company_grade ON grade_prices(grading_company, grade, card_id);
 CREATE INDEX IF NOT EXISTS idx_sync_items_run_status ON sync_items(sync_run_id, status);
+-- UNIQUE(card_id,…) can't police manual watches (SQLite treats NULL card_ids
+-- as distinct), so they get their own uniqueness rule.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_watches_manual
+  ON watches(description, grading_company, grade) WHERE card_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_listings_watch_status ON listings(watch_id, status);
 CREATE INDEX IF NOT EXISTS idx_listings_status ON listings(status, found_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_listings_canonical ON listings(canonical_key) WHERE canonical_key IS NOT NULL;

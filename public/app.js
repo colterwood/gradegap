@@ -7,6 +7,7 @@ const state = {
   playerId: '',
   sortColumn: 'abs_diff', // default: biggest dollar gaps first
   sortDir: 'desc',
+  watchFilter: 'all', // all | watched | unwatched (client-side)
   // Liquidity defaults to green only — both sides sold recently.
   colors: { green: true, yellow: false, red: false, gray: false },
   // Which graders are compared against the PSA baseline (several at once are
@@ -127,8 +128,11 @@ async function loadResults() {
 
 let lastMeta = { total: 0, excluded: 0, missing: [] };
 
+const isWatched = (row) => watchByKey.has(watchKey(row.card_id, row.grader, row.grade));
+
 function sortValue(row, column) {
   switch (column) {
+    case 'watch': return isWatched(row) ? 1 : 0;
     case 'color': return COLOR_RANK[row._dot.color];
     case 'grade': return Number(row.grade);
     case 'name': return (row.name || '').toLowerCase();
@@ -140,7 +144,12 @@ function sortValue(row, column) {
 
 function renderResults() {
   const active = new Set(Object.entries(state.colors).filter(([, v]) => v).map(([k]) => k));
-  const rows = currentRows.filter((r) => active.has(r._dot.color));
+  const rows = currentRows.filter((r) => {
+    if (!active.has(r._dot.color)) return false;
+    if (state.watchFilter === 'watched') return isWatched(r);
+    if (state.watchFilter === 'unwatched') return !isWatched(r);
+    return true;
+  });
 
   const col = state.sortColumn;
   const dir = state.sortDir === 'asc' ? 1 : -1;
@@ -166,7 +175,7 @@ function renderResults() {
     const link = row.cl_url
       ? `<a href="${esc(row.cl_url)}" target="_blank" rel="noopener">${esc(row.name)}</a>`
       : esc(row.name);
-    const watched = watchByKey.has(watchKey(row.card_id, row.grader, row.grade));
+    const watched = isWatched(row);
     tr.innerHTML = `
       <td class="watch-cell"><input type="checkbox" class="watch-cb" ${watched ? 'checked' : ''}
         data-card-id="${row.card_id}" data-grader="${esc(row.grader)}" data-grade="${esc(row.grade)}" /></td>
@@ -194,6 +203,8 @@ function renderResults() {
       emptyEl.textContent = 'Select a grade to compare.';
     } else if (!Object.values(state.graders).some(Boolean)) {
       emptyEl.textContent = 'Select at least one grader to compare against PSA.';
+    } else if (currentRows.length > 0 && state.watchFilter !== 'all') {
+      emptyEl.textContent = `No ${state.watchFilter} rows under the current filters.`;
     } else if (currentRows.length > 0) {
       emptyEl.textContent = 'All rows are hidden by the current Liquidity filter.';
     } else if (lastMeta.missing.length > 0) {
@@ -325,6 +336,9 @@ async function loadConfig() {
   const cfg = await api('/api/config');
   buildChecks('grade-filter', 'grade', cfg.grades, state.grades);
   buildChecks('grader-filter', 'grader', cfg.graders, state.graders);
+  // The hand-add form's dropdowns (wider vocabulary than the comparison).
+  fillSelect('new-grader', cfg.manualGraders ?? [], 'SGC');
+  fillSelect('new-grade', cfg.manualGrades ?? [], '10');
   document.querySelector('.subtitle').textContent =
     `${cfg.graders.join(' / ')} vs ${cfg.baseline} price disparity, like grade vs like grade`;
 }
@@ -353,6 +367,15 @@ function wireToggle(id, key) {
 }
 
 wireToggle('basis-toggle', 'basis');
+
+// Watched/unwatched is a client-side view of rows already loaded.
+$('watch-filter').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  for (const b of $('watch-filter').querySelectorAll('button')) b.classList.toggle('active', b === btn);
+  state.watchFilter = btn.dataset.value;
+  renderResults();
+});
 
 // Click a column header to sort by it; first click ascending, click again to
 // flip to descending. (Color column ascending = green→yellow→red.)
@@ -509,8 +532,13 @@ function fmtTimeLeft(endsAt) {
   return `${Math.floor(hours / 24)}d ${hours % 24}h left`;
 }
 
-// Card names ("1986 Fleer Michael Jordan #57") already carry year/set/number.
-const watchLabel = (w) => `${w.card_name} · ${w.grading_company} ${w.grade}`;
+// None grader + Raw grade are one state: an ungraded card.
+const slabLabel = (w) =>
+  w.grading_company === 'None' || w.grade === 'Raw' ? 'Ungraded' : `${w.grading_company} ${w.grade}`;
+
+// Card names ("1986 Fleer Michael Jordan #57") already carry year/set/number;
+// manual watches show the description that was typed.
+const watchLabel = (w) => `${w.card_name} · ${slabLabel(w)}`;
 
 function renderWatches(watches) {
   const tbody = document.querySelector('#watches-table tbody');
@@ -518,8 +546,8 @@ function renderWatches(watches) {
   for (const w of watches) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${esc(w.card_name)}</td>
-      <td class="grade-cell">${esc(w.grading_company)} ${esc(w.grade)}</td>
+      <td>${esc(w.card_name)}${w.card_id == null ? ' <span class="manual-tag">manual</span>' : ''}</td>
+      <td class="grade-cell">${esc(slabLabel(w))}</td>
       <td class="num"><input type="number" class="watch-max-price" data-id="${w.id}" min="0" step="50"
         value="${w.max_price ?? ''}" placeholder="—" /></td>
       <td class="num">${w.active_listings}</td>
@@ -556,6 +584,7 @@ function renderMatches(all) {
       <td><span class="source-badge">${esc(m.source)}</span></td>
       <td class="listing-title">${title}${m.seller ? `<div class="seller">${esc(m.seller)}</div>` : ''}</td>
       <td class="watch-ref">${esc(watchLabel(m))}</td>
+      <td class="num cl-value">${fmtMoney(m.cl_value)}</td>
       <td class="num">${fmtMoney(m.price_usd ?? m.price)}${m.currency && m.currency !== 'USD' ? `<div class="native-price">${esc(String(m.price))} ${esc(m.currency)}</div>` : ''}</td>
       <td>${m.listing_type === 'auction' ? 'Auction' : 'Buy It Now'}</td>
       <td>${ends}</td>
@@ -582,6 +611,67 @@ async function loadWatchedView() {
   await refreshCheckStatus();
   return watches;
 }
+
+// --- hand-add a watch ---
+
+function fillSelect(id, values, initial) {
+  const sel = $(id);
+  sel.innerHTML = '';
+  for (const v of values) {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v;
+    sel.appendChild(opt);
+  }
+  if (values.includes(initial)) sel.value = initial;
+}
+
+// 'None' grader and 'Raw' grade are one state (ungraded) — picking either
+// pulls the other along, and leaving it releases both to their defaults.
+function coupleUngraded(changed) {
+  const grader = $('new-grader');
+  const grade = $('new-grade');
+  if (changed === 'grader') {
+    if (grader.value === 'None') grade.value = 'Raw';
+    else if (grade.value === 'Raw') grade.value = '10';
+  } else {
+    if (grade.value === 'Raw') grader.value = 'None';
+    else if (grader.value === 'None') grader.value = 'SGC';
+  }
+}
+
+$('new-grader').addEventListener('change', () => coupleUngraded('grader'));
+$('new-grade').addEventListener('change', () => coupleUngraded('grade'));
+
+$('add-watch').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const description = $('new-desc').value.trim();
+  if (!description) {
+    setError('Enter a description for the card you want to watch.');
+    return;
+  }
+  setError('');
+  $('add-watch-btn').disabled = true;
+  try {
+    await api('/api/watches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        description,
+        gradingCompany: $('new-grader').value,
+        grade: $('new-grade').value,
+        maxPrice: $('new-max-price').value === '' ? null : parseFloat($('new-max-price').value),
+      }),
+    });
+    $('new-desc').value = '';
+    $('new-max-price').value = '';
+    await loadWatchedView();
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    $('add-watch-btn').disabled = false;
+  }
+});
 
 async function loadListingsView() {
   const statuses = $('show-ended').checked ? 'new,notified,dismissed,ended' : 'new,notified';

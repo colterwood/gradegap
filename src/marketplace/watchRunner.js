@@ -98,17 +98,23 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
   });
 
   async function processItem(source, item, watch, runId, runStartedAt) {
-    const target = {
-      playerName: watch.player_name ?? watch.card_name,
-      year: watch.year,
-      setName: watch.set_name,
-      cardNumber: watch.card_number,
-      parallel: watch.parallel,
-      company: watch.grading_company,
-      grade: watch.grade,
-    };
+    // Manual watches carry a typed description instead of a Ladder card.
+    const target = watch.description
+      ? { description: watch.description, company: watch.grading_company, grade: watch.grade }
+      : {
+          playerName: watch.player_name ?? watch.card_name,
+          year: watch.year,
+          setName: watch.set_name,
+          cardNumber: watch.card_number,
+          parallel: watch.parallel,
+          company: watch.grading_company,
+          grade: watch.grade,
+        };
     const queries = buildQueries(target);
-    currentLabel = `${source.name} — ${target.year ?? ''} ${target.playerName} ${target.company} ${target.grade}`.trim();
+    const label = watch.description
+      ? watch.description
+      : `${target.year ?? ''} ${target.playerName}`.trim();
+    currentLabel = `${source.name} — ${label} ${target.company} ${target.grade}`.trim();
 
     // Hard-capped: a wedged site fails this item, never the whole run.
     let raw = await withTimeout(source.search({ text: queries.tight }), 90_000, `${source.name} search`);

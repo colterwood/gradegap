@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildQueries, scoreListing, yearRegex, slabRegex } from '../src/marketplace/match.js';
+import {
+  buildQueries,
+  scoreListing,
+  yearRegex,
+  slabRegex,
+  slabMatcher,
+  isUngraded,
+} from '../src/marketplace/match.js';
 
 const luka = {
   playerName: 'Luka Doncic',
@@ -123,4 +130,79 @@ test('parallel tokens count when the watch has one', () => {
   const withPar = scoreListing(silver, '2018-19 Panini Prizm Silver Luka Doncic #280 PSA 10');
   const withoutPar = scoreListing(silver, '2018-19 Panini Prizm Luka Doncic #280 PSA 10');
   assert.ok(withPar.score > withoutPar.score);
+});
+
+// --- manual watches (hand-added on the Watched tab) ------------------------
+
+const manual = (over = {}) => ({
+  description: '1986 Fleer Michael Jordan #57',
+  company: 'SGC',
+  grade: '10',
+  ...over,
+});
+
+test('manual watch: every typed word must appear in the title', () => {
+  const hit = scoreListing(manual(), '1986 Fleer Michael Jordan #57 Rookie SGC 10 GEM');
+  assert.equal(hit.ok, true);
+  assert.equal(hit.score, 1);
+
+  // missing "fleer" -> rejected
+  assert.equal(scoreListing(manual(), '1986 Michael Jordan #57 SGC 10').ok, false);
+  // right words, wrong slab -> rejected
+  assert.equal(scoreListing(manual(), '1986 Fleer Michael Jordan #57 PSA 10').ok, false);
+});
+
+test('manual watch: buildQueries appends the slab, loose drops it', () => {
+  const q = buildQueries(manual());
+  assert.equal(q.tight, '1986 Fleer Michael Jordan #57 SGC 10');
+  assert.equal(q.loose, '1986 Fleer Michael Jordan #57');
+
+  // Any/Any and ungraded contribute no slab words to the query
+  assert.equal(buildQueries(manual({ company: 'Any', grade: 'Any' })).tight, '1986 Fleer Michael Jordan #57');
+  assert.equal(buildQueries(manual({ company: 'None', grade: 'Raw' })).tight, '1986 Fleer Michael Jordan #57');
+  assert.equal(buildQueries(manual({ company: 'Any', grade: '10' })).tight, '1986 Fleer Michael Jordan #57 10');
+});
+
+test('slabMatcher: Any grader matches any company at that grade', () => {
+  const m = slabMatcher('Any', '10');
+  assert.ok(m.test('1986 fleer jordan psa 10'));
+  assert.ok(m.test('1986 fleer jordan bgs 10'));
+  assert.ok(!m.test('1986 fleer jordan psa 9'));
+  assert.ok(!m.test('1986 fleer jordan raw ungraded'));
+});
+
+test('slabMatcher: Any grade matches that company at any grade', () => {
+  const m = slabMatcher('PSA', 'Any');
+  assert.ok(m.test('jordan psa 9'));
+  assert.ok(m.test('jordan psa 1.5'));
+  assert.ok(m.test('jordan psa authentic'));
+  assert.ok(!m.test('jordan sgc 9'));
+});
+
+test('slabMatcher: Any/Any accepts anything; ungraded rejects slabbed cards', () => {
+  assert.ok(slabMatcher('Any', 'Any').test('anything at all'));
+
+  const raw = slabMatcher('None', 'Raw');
+  assert.equal(raw.label, 'ungraded');
+  assert.ok(raw.test('1986 fleer michael jordan #57 rookie nice centering'));
+  assert.ok(!raw.test('1986 fleer michael jordan #57 psa 8'));
+  assert.ok(!raw.test('1986 fleer michael jordan #57 bgs 9.5'));
+  // either half of the pairing means the same thing
+  assert.ok(isUngraded('None', '10') && isUngraded('SGC', 'Raw'));
+  assert.equal(slabMatcher('SGC', 'Raw').label, 'ungraded');
+});
+
+test('manual watch: ungraded finds raw cards and skips slabs', () => {
+  const target = manual({ company: 'None', grade: 'Raw' });
+  assert.equal(scoreListing(target, '1986 Fleer Michael Jordan #57 rookie sharp raw').ok, true);
+  assert.equal(scoreListing(target, '1986 Fleer Michael Jordan #57 PSA 8').ok, false);
+});
+
+test('half grades and Authentic are matched exactly', () => {
+  assert.ok(slabRegex('BGS', '9.5').test('2003 topps lebron bgs 9.5 gem'));
+  assert.ok(!slabRegex('BGS', '9').test('2003 topps lebron bgs 9.5 gem'));
+  assert.ok(!slabRegex('BGS', '9.5').test('2003 topps lebron bgs 9 gem'));
+  assert.ok(slabRegex('PSA', 'Authentic').test('1986 fleer jordan psa authentic'));
+  assert.ok(slabRegex('PSA', 'Authentic').test('1986 fleer jordan PSA AUTH'));
+  assert.ok(!slabRegex('PSA', 'Authentic').test('1986 fleer jordan psa 10'));
 });

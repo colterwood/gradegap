@@ -1,5 +1,11 @@
 import { Router } from 'express';
-import { BASELINE_COMPANY, COMPARE_GRADERS, COMPARE_GRADES } from '../config.js';
+import {
+  BASELINE_COMPANY,
+  COMPARE_GRADERS,
+  COMPARE_GRADES,
+  MANUAL_GRADERS,
+  MANUAL_GRADES,
+} from '../config.js';
 
 // Watch + matches routes, mounted at /api beside makeApiRouter. Same rules:
 // all SQL lives in queries.js, 409 means "already running".
@@ -7,14 +13,39 @@ export function makeWatchRouter(db, q, watchRunner) {
   const router = Router();
 
   const VALID_COMPANIES = [BASELINE_COMPANY, ...COMPARE_GRADERS];
+  const toPrice = (v) => (v == null || v === '' ? null : Math.max(0, parseFloat(v) || 0) || null);
+
+  // 'None' grader and 'Raw' grade are two names for one state — pick either
+  // in the UI and both are stored, so the slab rule is unambiguous.
+  function normalizeManualSlab(gradingCompany, grade) {
+    if (String(gradingCompany) === 'None' || String(grade) === 'Raw') {
+      return { gradingCompany: 'None', grade: 'Raw' };
+    }
+    return { gradingCompany: String(gradingCompany), grade: String(grade) };
+  }
 
   router.post('/watches', (req, res) => {
-    const { cardId, gradingCompany, grade, maxPrice = null } = req.body ?? {};
+    const { cardId, description, gradingCompany, grade, maxPrice = null } = req.body ?? {};
+    const price = toPrice(maxPrice);
+
+    // Hand-added watch: free text instead of a Card Ladder card.
+    if (description !== undefined && description !== null && String(description).trim() !== '') {
+      if (!MANUAL_GRADERS.includes(String(gradingCompany)) || !MANUAL_GRADES.includes(String(grade))) {
+        return res.status(400).json({ ok: false, error: 'grader/grade must come from the configured lists' });
+      }
+      const slab = normalizeManualSlab(gradingCompany, grade);
+      const text = String(description).trim().replace(/\s+/g, ' ');
+      q.insertManualWatch.run({ description: text, ...slab, maxPrice: price });
+      return res.json({
+        ok: true,
+        watch: q.getManualWatchByKey.get(text, slab.gradingCompany, slab.grade),
+      });
+    }
+
     const card = Number(cardId);
     if (!Number.isInteger(card) || !VALID_COMPANIES.includes(gradingCompany) || !COMPARE_GRADES.includes(String(grade))) {
-      return res.status(400).json({ ok: false, error: 'need cardId + a configured gradingCompany + grade' });
+      return res.status(400).json({ ok: false, error: 'need cardId + a configured gradingCompany + grade, or a description' });
     }
-    const price = maxPrice == null || maxPrice === '' ? null : Math.max(0, parseFloat(maxPrice) || 0) || null;
     try {
       q.insertWatch.run({ cardId: card, gradingCompany, grade: String(grade), maxPrice: price });
     } catch {

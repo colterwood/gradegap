@@ -27,12 +27,28 @@ const tokenize = (s) =>
 // `loose` (used when tight finds nothing) drops set/parallel — the fields
 // sellers most often word differently — keeping year + player + number +
 // slab. Either way the match layer re-verifies every result.
-export function buildQueries({ year, setName, playerName, cardNumber, parallel, company, grade }) {
-  const slab = `${company} ${grade}`;
-  const tight = [year, setName, playerName, parallel, slab].filter(Boolean).join(' ');
+export function buildQueries(target) {
+  const { year, setName, playerName, cardNumber, parallel, company, grade, description } = target;
+  // Slab words worth sending to a site's search box: skip them when the
+  // watch says Any/ungraded (they'd wrongly narrow the results).
+  const slab = isUngraded(company, grade)
+    ? ''
+    : [
+        String(company).toLowerCase() === 'any' ? '' : company,
+        String(grade).toLowerCase() === 'any' ? '' : grade,
+      ].filter(Boolean).join(' ');
+
+  // Manual watch: the typed description IS the query.
+  if (description) {
+    const tight = [description, slab].filter(Boolean).join(' ').trim();
+    return { tight, loose: tight === description ? null : description };
+  }
+
+  const tight = [year, setName, playerName, parallel, slab].filter(Boolean).join(' ').trim();
   const loose = [year, playerName, cardNumber ? `#${cardNumber}` : null, slab]
     .filter(Boolean)
-    .join(' ');
+    .join(' ')
+    .trim();
   return { tight, loose: loose !== tight ? loose : null };
 }
 
@@ -58,31 +74,80 @@ export function yearRegex(year) {
 // number — "PSA lot of 9" must NOT match.
 const GRADE_WORDS = '(?:gem|mint|mt|nm|ex|vg|gd|fr|pr|near|pristine|authentic)';
 
+// A grade is a number ("10", "9.5") or the word grade "Authentic".
+function gradeSource(grade) {
+  const g = String(grade);
+  if (/^authentic$/i.test(g)) return '(?:authentic|auth)\\b';
+  // Trailing lookahead blocks decimals ("9" must not match "9.5") but NOT
+  // sentence punctuation ("…PSA Mint 9." is a match).
+  return `${esc(g)}(?!\\d)(?!\\.\\d)`;
+}
+
 export function slabRegex(company, grade) {
-  const g = esc(String(grade));
   // No \b between company and grade: "PSA10" has no letter/digit boundary.
-  // Trailing lookahead blocks decimals ("10.5", "9.5") but NOT sentence
-  // punctuation ("…PSA Mint 9." is a match).
   return new RegExp(
-    `\\b${esc(company)}[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}${g}(?!\\d)(?!\\.\\d)`,
+    `\\b${esc(company)}[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}${gradeSource(grade)}`,
     'i'
   );
 }
 
+// Same grade, any grading company — the "Any" grader of a manual watch.
+export function anyGraderRegex(grade) {
+  return new RegExp(
+    `\\b(?:${GRADERS.join('|')})[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}${gradeSource(grade)}`,
+    'i'
+  );
+}
+
+// Named company, any grade — the "Any" grade of a manual watch.
+export function anyGradeRegex(company) {
+  return new RegExp(
+    `\\b${esc(company)}[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}(?:\\d{1,2}(?:\\.5)?(?!\\d)|authentic|auth)\\b`,
+    'i'
+  );
+}
+
+export const isUngraded = (company, grade) =>
+  String(company ?? '').toLowerCase() === 'none' || String(grade ?? '').toLowerCase() === 'raw';
+
+// The slab rule for a watch, covering every manual-watch combination.
+// 'Any' grader means any GRADING COMPANY; ungraded is the separate None/Raw
+// pairing, which demands the title show no slab at all.
+export function slabMatcher(company, grade) {
+  const co = String(company ?? '');
+  const gr = String(grade ?? '');
+  if (isUngraded(co, gr)) {
+    return { label: 'ungraded', kind: 'ungraded', test: (raw) => !anySlabRe().test(raw) };
+  }
+  const anyCo = co.toLowerCase() === 'any';
+  const anyGr = gr.toLowerCase() === 'any';
+  if (anyCo && anyGr) return { label: 'any slab', kind: 'any', test: () => true };
+  if (anyCo) return { label: `any ${gr}`, kind: 'anyGrader', test: (raw) => anyGraderRegex(gr).test(raw) };
+  if (anyGr) return { label: `${co} any`, kind: 'anyGrade', test: (raw) => anyGradeRegex(co).test(raw) };
+  return { label: `${co} ${gr}`, kind: 'exact', test: (raw) => slabRegex(co, gr).test(raw) };
+}
+
 // Every "GRADER n" mention in a title (word-label forms included), for
-// wrong-slab penalties.
-const ANY_SLAB_RE = new RegExp(
-  `\\b(${GRADERS.join('|')})[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}(\\d{1,2}(?:\\.5)?)(?!\\d)(?!\\.\\d)`,
-  'gi'
-);
+// wrong-slab penalties and the ungraded test. Built fresh per use: a /g
+// regex carries lastIndex state between calls.
+const ANY_SLAB_SRC =
+  `\\b(${GRADERS.join('|')})[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}(\\d{1,2}(?:\\.5)?(?!\\d)(?!\\.\\d)|authentic\\b)`;
+const anySlabRe = () => new RegExp(ANY_SLAB_SRC, 'i');
+const anySlabReGlobal = () => new RegExp(ANY_SLAB_SRC, 'gi');
 
 // Words that mean "this is not the real slab you watched" (plural-tolerant:
 // "Fleer Reprints" must trip the reprint penalty).
 const BAD_WORDS_RE = /\b(reprints?|replicas?|customs?|prox(?:y|ies)|digital|novelty|lots?|breaks?)\b/g;
 
+const badWords = (raw) =>
+  new Set([...raw.matchAll(BAD_WORDS_RE)].map((m) => m[1].replace(/ies$/, 'y').replace(/s$/, '')));
+
 // --- scoring ---------------------------------------------------------------
 
-// target: { playerName, year, setName, cardNumber, parallel, company, grade }
+// target: a catalog watch
+//   { playerName, year, setName, cardNumber, parallel, company, grade }
+// or a manual watch
+//   { description, company, grade }   ('Any'/'None'/'Raw' allowed)
 // Returns { ok, score, debug: { matched, missing, penalties } }.
 // ok=false → hard requirement failed, listing must not be stored.
 export function scoreListing(target, title) {
@@ -92,7 +157,29 @@ export function scoreListing(target, title) {
   const missing = [];
   const penalties = [];
 
-  // -- hard requirements
+  // -- slab rule: shared by both watch kinds
+  const slab = slabMatcher(target.company, target.grade);
+  if (slab.test(raw)) matched.push(`slab:${slab.label}`);
+  else missing.push(`slab:${slab.label}`);
+
+  // -- manual watch: every word typed must appear in the title
+  if (target.description) {
+    const want = tokenize(target.description).filter((t) => t.length >= 2);
+    const missed = want.filter((t) => !tokens.has(t));
+    if (missed.length > 0) missing.push(`words:${missed.join(' ')}`);
+    else if (want.length) matched.push(`words:${want.join(' ')}`);
+    if (missing.length > 0) return { ok: false, score: 0, debug: { matched, missing, penalties } };
+
+    // All requested words present: full confidence, less any junk-word hits.
+    let score = 1;
+    for (const w of badWords(raw)) {
+      score -= 0.4;
+      penalties.push(`word:${w}`);
+    }
+    return { ok: true, score: Math.max(0, Math.min(1, score)), debug: { matched, missing, penalties } };
+  }
+
+  // -- catalog watch hard requirements
   if (target.year) {
     if (yearRegex(target.year).test(raw)) matched.push(`year:${target.year}`);
     else missing.push(`year:${target.year}`);
@@ -102,11 +189,6 @@ export function scoreListing(target, title) {
   if (lastName) {
     if (tokens.has(lastName)) matched.push(`player:${lastName}`);
     else missing.push(`player:${lastName}`);
-  }
-  if (slabRegex(target.company, target.grade).test(raw)) {
-    matched.push(`slab:${target.company} ${target.grade}`);
-  } else {
-    missing.push(`slab:${target.company} ${target.grade}`);
   }
   // Set name is a hard requirement too (when the card has one): at least one
   // significant set token must appear, or "1997 Kobe SGC 9" matches every
@@ -152,7 +234,7 @@ export function scoreListing(target, title) {
   }
 
   // -- penalties
-  for (const m of raw.matchAll(ANY_SLAB_RE)) {
+  for (const m of raw.matchAll(anySlabReGlobal())) {
     const company = m[1].toUpperCase();
     const grade = m[2];
     if (company === target.company.toUpperCase() && grade !== String(target.grade)) {
@@ -163,10 +245,7 @@ export function scoreListing(target, title) {
       penalties.push(`slab:${company} ${grade}`);
     }
   }
-  const badWords = new Set(
-    [...raw.matchAll(BAD_WORDS_RE)].map((x) => x[1].replace(/ies$/, 'y').replace(/s$/, ''))
-  );
-  for (const w of badWords) {
+  for (const w of badWords(raw)) {
     score -= 0.4;
     penalties.push(`word:${w}`);
   }

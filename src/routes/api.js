@@ -1,5 +1,11 @@
 import { Router } from 'express';
-import { BASELINE_COMPANY, COMPARE_GRADERS, COMPARE_GRADES } from '../config.js';
+import {
+  BASELINE_COMPANY,
+  COMPARE_GRADERS,
+  COMPARE_GRADES,
+  MANUAL_GRADERS,
+  MANUAL_GRADES,
+} from '../config.js';
 
 export function makeApiRouter(db, q, syncManager) {
   const router = Router();
@@ -7,7 +13,14 @@ export function makeApiRouter(db, q, syncManager) {
   // The UI builds its Grade checkboxes and Grader dropdown from this, so
   // adding a grade or grader is a config-only change.
   router.get('/config', (_req, res) => {
-    res.json({ grades: COMPARE_GRADES, graders: COMPARE_GRADERS, baseline: BASELINE_COMPANY });
+    res.json({
+      grades: COMPARE_GRADES,
+      graders: COMPARE_GRADERS,
+      baseline: BASELINE_COMPANY,
+      // Wider vocabularies for the Watched tab's hand-add form.
+      manualGraders: MANUAL_GRADERS,
+      manualGrades: MANUAL_GRADES,
+    });
   });
 
   router.post('/sync', (req, res) => {
