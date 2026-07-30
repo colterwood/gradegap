@@ -14,10 +14,16 @@ if (!config.ntfyTopic) {
 const server = config.ntfyServer.replace(/\/+$/, '');
 console.log(`sending a test push to ${server}/${config.ntfyTopic} …`);
 
+const clickUrl = `${config.appBaseUrl || `http://localhost:${config.port}`}/#listings`;
+console.log(`notification will link to ${clickUrl}`);
+if (!config.appBaseUrl) {
+  console.log('  (localhost only opens on THIS machine — set APP_BASE_URL to make it tappable from your phone)');
+}
+
 const ok = await sendNtfy({
   title: 'GradeGap test',
   message: 'Notifications are wired up correctly — real alerts will look like this.',
-  clickUrl: `http://localhost:${config.port}/#listings`,
+  clickUrl,
 });
 
 if (ok) {

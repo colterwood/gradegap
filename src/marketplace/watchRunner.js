@@ -205,7 +205,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
 
   async function notifyAfterRun() {
     const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
-    const watchedUrl = `http://localhost:${config.port}/#listings`;
+    const watchedUrl = `${config.appBaseUrl || `http://localhost:${config.port}`}/#listings`;
 
     // One aggregate push per run, per the user's design — never per-listing.
     // If the push fails (or ntfy isn't configured) listings stay 'new' and

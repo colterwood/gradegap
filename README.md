@@ -118,7 +118,13 @@ sub-50% matches are hidden behind a toggle so *you* make the final call
 
 - **Checking cadence**: every `WATCH_INTERVAL_MIN` minutes (default 30)
   while the server runs, plus a **Check now** button. Set `0` for
-  manual-only.
+  manual-only. Checks only happen while the app is running and the machine
+  is awake — a sleeping laptop finds nothing, and picks up where it left
+  off when it wakes.
+- **Pushes reach your phone anywhere** (they relay through ntfy's servers,
+  not your local network). Tapping one opens the app, which only works from
+  the phone if you set `APP_BASE_URL` + `BIND_HOST` — see the Configuration
+  reference.
 - **Phone pushes** (optional): install the [ntfy](https://ntfy.sh) app,
   subscribe to a **long random** topic name (the name is the only secret —
   anyone who guesses it can read your alerts), set `NTFY_TOPIC` in `.env`,
@@ -215,6 +221,17 @@ CL_PASSWORD=
 
 # Port for the local web UI
 PORT=4000
+
+# Bind address. Default 127.0.0.1 = this machine only. Set 0.0.0.0 to reach
+# the app from your phone/tablet on the same network — the app has NO login,
+# so only do that on a network you trust.
+BIND_HOST=127.0.0.1
+
+# Where phone notifications should link to. Default is localhost, which only
+# opens on the machine running the app; set this to your laptop's LAN address
+# (e.g. http://192.168.1.50:4000) or a VPN/Tailscale hostname to make pushes
+# tappable from the phone. Pair with BIND_HOST=0.0.0.0.
+APP_BASE_URL=
 
 # Run the sync browser headless. Keep false — a visible browser is more
 # reliable against Cloudflare bot detection.

@@ -53,6 +53,9 @@ export const CRAWL_CONDITIONS = COMPARE_GRADES.flatMap((g) => [
 
 export const config = {
   port: intEnv('PORT', 4000),
+  // Loopback by default: this app has no authentication. Set BIND_HOST to
+  // 0.0.0.0 only if you want other devices on your network to reach it.
+  bindHost: process.env.BIND_HOST || '127.0.0.1',
   headless: process.env.HEADLESS === 'true',
   mock: process.env.MOCK_CL === '1' || process.argv.includes('--mock'),
   discovery: process.env.DISCOVERY === '1',
@@ -83,6 +86,11 @@ export const config = {
   shopifyShops: listEnv('SHOPIFY_SHOPS', ''),
   ntfyTopic: process.env.NTFY_TOPIC || '',
   ntfyServer: process.env.NTFY_SERVER || 'https://ntfy.sh',
+  // Where a phone notification should link to. localhost only resolves on
+  // the machine running the app, so set APP_BASE_URL (e.g. your laptop's
+  // LAN address, or a VPN/Tailscale hostname) to make pushes tappable from
+  // the phone — pair it with BIND_HOST=0.0.0.0.
+  appBaseUrl: (process.env.APP_BASE_URL || '').replace(/\/+$/, ''),
   dataDir: path.join(ROOT, 'data'),
   capturesDir: path.join(ROOT, 'captures'),
   profileDir: path.join(ROOT, 'profile'),

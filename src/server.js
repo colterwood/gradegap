@@ -20,8 +20,12 @@ app.use('/api', makeApiRouter(db, q, syncManager));
 app.use('/api', makeWatchRouter(db, q, watchRunner));
 app.use(express.static(config.publicDir));
 
-app.listen(config.port, '127.0.0.1', () => {
+app.listen(config.port, config.bindHost, () => {
   console.log(`GradeGap running at http://localhost:${config.port}${config.mock ? '  (MOCK mode)' : ''}`);
+  if (config.bindHost !== '127.0.0.1') {
+    console.log(`  reachable on your network at ${config.bindHost}:${config.port} — this app has NO login,`);
+    console.log('  so only do this on a network you trust.');
+  }
   // Marketplace checks run on a timer while the server is up (0 = manual only).
   watchRunner.startScheduler();
 });
