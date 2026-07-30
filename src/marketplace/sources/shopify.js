@@ -61,6 +61,10 @@ export function createShopifySource() {
     needsBrowser: false,
     minIntervalMs: 1500,
 
+    configured() {
+      return shops.length === 0 ? 'set SHOPIFY_SHOPS in .env (comma-separated shop domains)' : null;
+    },
+
     async start() {
       if (shops.length === 0) {
         throw new Error('shopify source enabled but SHOPIFY_SHOPS is empty (see .env.example)');

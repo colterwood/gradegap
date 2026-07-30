@@ -33,14 +33,20 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
   let lastError = null;
   let donePromise = null;
   let timer = null;
+  let skippedSources = [];
 
   function status() {
+    const run = q.latestWatchRun.get() ?? null;
     return {
       running,
       currentLabel,
       lastError,
-      run: q.latestWatchRun.get() ?? null,
+      run,
       newCount: q.countActiveMatches.get().n,
+      // Why items failed, grouped — the UI shows this so "35 failed" is
+      // never a dead end.
+      failures: run ? q.watchRunFailures.all(run.id) : [],
+      skippedSources,
     };
   }
 
@@ -227,9 +233,25 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
     if (watches.length === 0) {
       throw Object.assign(new Error('no watched cards — flag cards in the results table first'), { code: 400 });
     }
-    const sources = await createMarketplaceSources();
-    if (sources.length === 0) {
+    const allSources = await createMarketplaceSources();
+    if (allSources.length === 0) {
       throw Object.assign(new Error('no watch sources configured (WATCH_SOURCES)'), { code: 400 });
+    }
+    // A source missing its setup (e.g. eBay without API keys) is skipped
+    // with a reason instead of failing every watch against it.
+    const sources = [];
+    skippedSources = [];
+    for (const s of allSources) {
+      const reason = s.configured?.() ?? null;
+      if (reason) skippedSources.push({ name: s.name, reason });
+      else sources.push(s);
+    }
+    if (sources.length === 0) {
+      const detail = skippedSources.map((s) => `${s.name}: ${s.reason}`).join(' · ');
+      throw Object.assign(
+        new Error(`no usable watch sources — ${detail}. Sources needing no setup: fanatics, comc, hibid, heritage, myslabs, pristine, goldin, cia, classic, miller, catawiki (set WATCH_SOURCES in .env).`),
+        { code: 400 }
+      );
     }
 
     const runId = Number(q.createWatchRun.run(trigger).lastInsertRowid);

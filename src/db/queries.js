@@ -323,6 +323,12 @@ export function makeQueries(db) {
       ON CONFLICT(run_id, watch_id, source) DO NOTHING
     `),
     pendingWatchItems: db.prepare(`SELECT * FROM watch_check_items WHERE run_id = ? AND status = 'pending' ORDER BY id`),
+    // Distinct failure reasons for a run, so the UI can explain "N failed".
+    watchRunFailures: db.prepare(`
+      SELECT source, error, COUNT(*) AS n FROM watch_check_items
+      WHERE run_id = ? AND status = 'failed'
+      GROUP BY source, error ORDER BY n DESC
+    `),
     markWatchItem: db.prepare(`
       UPDATE watch_check_items SET status = @status, attempts = attempts + 1, error = @error WHERE id = @id
     `),

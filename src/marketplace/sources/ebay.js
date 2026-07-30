@@ -89,6 +89,16 @@ export function createEbaySource() {
     needsBrowser: false,
     minIntervalMs: 1200,
 
+    // Non-null = this source can't run yet, and why. Checked before a run
+    // queues any work, so missing setup reads as "skipped: <reason>" instead
+    // of every watch failing.
+    configured() {
+      if (!config.ebayClientId || !config.ebayClientSecret) {
+        return 'set EBAY_CLIENT_ID / EBAY_CLIENT_SECRET in .env (free developer keyset — see .env.example)';
+      }
+      return null;
+    },
+
     async start(ctx = {}) {
       q = ctx.q ?? null;
       if (!config.ebayClientId || !config.ebayClientSecret) {

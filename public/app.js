@@ -648,6 +648,14 @@ async function refreshCheckStatus() {
     } else if (s.run.status === 'failed') {
       setError(`Last check failed: ${s.run.error ?? s.lastError ?? 'unknown error'}`);
     }
+    // Never leave "N failed" unexplained: show the grouped reasons, plus any
+    // source skipped for missing setup.
+    const notes = [
+      ...(s.failures ?? []).map((f) => `${f.source} — ${f.error ?? 'unknown error'} (${f.n} watch${f.n === 1 ? '' : 'es'})`),
+      ...(s.skippedSources ?? []).map((x) => `${x.name} skipped — ${x.reason}`),
+    ];
+    if (notes.length > 0 && s.run.status !== 'failed') setError(notes.join(' · '));
+    else if (notes.length === 0 && s.run.status === 'completed') setError('');
   }
   updateBadge(s.newCount);
 
