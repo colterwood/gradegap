@@ -67,7 +67,14 @@ export function parseHibidResults(results) {
       listingType: 'auction',
       endsAt: lot.auction?.bidCloseDateTime ?? null,
       imageUrl: lot.featuredPicture?.thumbnailLocation ?? lot.featuredPicture?.fullSizeLocation ?? null,
-      seller: lot.auction?.auctioneer?.name ?? lot.auction?.eventName ?? null,
+      // House + location, so Canadian vs US lots are visible at a glance
+      // (the global search spans both).
+      seller: [
+        lot.auction?.auctioneer?.name ?? lot.auction?.eventName ?? null,
+        [lot.auction?.eventCity, lot.auction?.eventState].filter(Boolean).join(', ') || null,
+      ]
+        .filter(Boolean)
+        .join(' — ') || null,
     });
   }
   return out;

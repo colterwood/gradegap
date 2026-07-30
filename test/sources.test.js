@@ -629,3 +629,32 @@ test('goldin: a payload slug or URL beats the search fallback', async () => {
   assert.equal(withUrl.url, 'https://goldin.co/item/card-two-ab12cd');
   assert.match(without.url, /\/buy\?search=/);
 });
+
+test('goldin: meta_slug builds real /item/ links; end_timestamp becomes ISO', async () => {
+  const { parseGoldinLots } = await import('../src/marketplace/sources/goldin.js');
+  // Real key set from a live debug dump: meta_slug carries the item slug,
+  // end_timestamp the auction close.
+  const [lot] = parseGoldinLots({
+    searchalgolia: { lots: [{
+      lot_id: 42,
+      title: '1986-87 Fleer #57 Michael Jordan - BGS NM-MT 8',
+      meta_slug: '1986-87-fleer-57-michael-jordan-bgs-nm-mt-89p99a',
+      current_price: 900,
+      end_timestamp: 1785540000,
+      auction_id: 7, auction_type: 'weekly', buyer_premium: 20, lot_number: 12,
+    }] },
+  }, null);
+  assert.equal(lot.url, 'https://goldin.co/item/1986-87-fleer-57-michael-jordan-bgs-nm-mt-89p99a');
+  assert.match(lot.endsAt, /^20\d\d-.*Z$/);
+});
+
+test('hibid: seller carries house and location so CA vs US is visible', async () => {
+  const out = parseHibidResults([
+    {
+      itemId: 9, lead: '1979 OPC Wayne Gretzky PSA 5 rookie card',
+      lotState: { highBid: 100, isClosed: false },
+      auction: { currencyAbbreviation: 'CAD', eventCity: 'Calgary', eventState: 'AB', auctioneer: { name: 'Prairie Auctions' } },
+    },
+  ]);
+  assert.equal(out[0].seller, 'Prairie Auctions — Calgary, AB');
+});

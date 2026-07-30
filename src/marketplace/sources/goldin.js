@@ -22,6 +22,15 @@ export function extractGoldinConfig(bundleJs) {
   };
 }
 
+// Epoch (seconds or ms) → ISO; anything else → null.
+const epochToIso = (v) => {
+  const n = toNumber(v);
+  if (n == null) return null;
+  if (n > 1e12) return new Date(n).toISOString();
+  if (n > 1e9) return new Date(n * 1000).toISOString();
+  return null;
+};
+
 // Pure, fixture-testable: a lots response body → normalized raw listings.
 export function parseGoldinLots(body, cloudFront, listingType = 'auction') {
   const lots = body?.searchalgolia?.lots ?? body?.lots ?? [];
@@ -32,9 +41,10 @@ export function parseGoldinLots(body, cloudFront, listingType = 'auction') {
     // Item pages are /item/<slug> (user-verified live, e.g.
     // /item/1986-87-fleer-57-michael-jordan-bgs-nm-mt-89p99a) — the slug
     // carries a hash suffix, so it can't be built from the title; it must
-    // come from the payload. Hunt the likely keys, including a full URL.
+    // come from the payload. Live lots carry it as meta_slug (confirmed by
+    // a debug key dump); the others are fallbacks.
     const slug =
-      lot.slug ?? lot.url_slug ?? lot.item_slug ?? lot.seo_slug ?? lot.handle ?? lot.item_id_text ?? null;
+      lot.meta_slug ?? lot.slug ?? lot.url_slug ?? lot.item_slug ?? lot.seo_slug ?? lot.handle ?? null;
     const directUrl = [lot.url, lot.item_url, lot.itemUrl, lot.link].find(
       (v) => typeof v === 'string' && v.includes('/item/')
     );
@@ -54,7 +64,8 @@ export function parseGoldinLots(body, cloudFront, listingType = 'auction') {
       price: toNumber(lot.current_price ?? lot.min_bid_price ?? lot.price ?? lot.buy_now_price),
       currency: 'USD',
       listingType,
-      endsAt: lot.end_time ?? lot.ends_at ?? lot.auction_end_time ?? null,
+      // end_timestamp (epoch) is what live lots actually carry.
+      endsAt: epochToIso(lot.end_timestamp) ?? lot.end_time ?? lot.ends_at ?? lot.auction_end_time ?? null,
       imageUrl,
       seller: null,
     });

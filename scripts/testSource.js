@@ -44,6 +44,7 @@ try {
     console.log(`- [${r.listingType ?? '?'}] ${price} · ${r.title}`);
     if (r.url) console.log(`    ${r.url}`);
     if (r.endsAt) console.log(`    ends ${r.endsAt}`);
+    if (r.seller) console.log(`    seller: ${r.seller}`);
   }
   if (results.length > 20) console.log(`… and ${results.length - 20} more`);
 } catch (err) {
