@@ -8,7 +8,7 @@
 // `npm run test-source pristine "jordan psa 10" --debug`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { saveDebug, debugLog, toNumber } from './util.js';
+import { saveDebug, debugLog, toNumber, gotoStable, parkPage } from './util.js';
 import { searchShopifyShop } from './shopify.js';
 
 const SITE = 'https://www.pristineauction.com';
@@ -168,9 +168,14 @@ export function createPristineSource() {
       ];
       let auctionResults = [];
       for (const url of candidates) {
+        await parkPage(page);
         sniffedJson = [];
-        const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => null);
-        const status = res?.status() ?? 0;
+        const res = await gotoStable(page, url).catch(() => undefined);
+        if (res === undefined) {
+          debugLog('pristine', `GET ${url} → navigation failed`);
+          continue;
+        }
+        const status = res === null ? 200 : res.status(); // null = arrived via an interrupted nav
         if (status < 200 || status >= 400) {
           debugLog('pristine', `GET ${url} → ${status}`);
           continue;

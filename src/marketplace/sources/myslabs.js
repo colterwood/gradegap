@@ -6,6 +6,7 @@
 // Verify locally with `npm run test-source myslabs "jordan psa 10"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
+import { gotoStable, parkPage, debugLog } from './util.js';
 
 const SITE = 'https://www.myslabs.com';
 
@@ -14,7 +15,10 @@ export function createMySlabsSource() {
   let page = null;
 
   async function scrapeSearch(url, listingType) {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    // MySlabs schedules its own navigation shortly after a results page
+    // loads; parking first stops it aborting ours.
+    await parkPage(page);
+    await gotoStable(page, url);
     await page.waitForTimeout(2500); // JS render + lazy tiles
 
     return page.$$eval('.slab_item', (tiles, meta) =>
@@ -60,16 +64,24 @@ export function createMySlabsSource() {
 
     async search({ text }) {
       const q = encodeURIComponent(text);
-      const fixed = await scrapeSearch(
-        `${SITE}/search/slabs/?publish_type=0&owner=&q=${q}&o=created_desc`,
-        'fixed'
-      );
-      const auctions = await scrapeSearch(
-        `${SITE}/auction/search/all/?publish_type=all&owner=&q=${q}&o=endtime_asc`,
-        'auction'
-      );
+      // One venue failing (or being empty) must not lose the other's hits.
+      const venues = [
+        { url: `${SITE}/search/slabs/?publish_type=0&owner=&q=${q}&o=created_desc`, type: 'fixed' },
+        { url: `${SITE}/auction/search/all/?publish_type=all&owner=&q=${q}&o=endtime_asc`, type: 'auction' },
+      ];
+      const all = [];
+      const errors = [];
+      for (const v of venues) {
+        try {
+          all.push(...(await scrapeSearch(v.url, v.type)));
+        } catch (err) {
+          errors.push(`${v.type}: ${String(err?.message ?? err).split('\n')[0]}`);
+        }
+      }
+      if (errors.length === venues.length) throw new Error(`MySlabs — ${errors.join(' · ')}`);
+      if (errors.length) debugLog('myslabs', `partial: ${errors.join(' · ')}`);
       const seen = new Set();
-      return [...auctions, ...fixed].filter((l) => !seen.has(l.listingId) && seen.add(l.listingId));
+      return all.filter((l) => !seen.has(l.listingId) && seen.add(l.listingId));
     },
 
     async close() {

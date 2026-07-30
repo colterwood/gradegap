@@ -7,6 +7,7 @@
 // Verify locally with `npm run test-source hibid "psa 10 jordan"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
+import { gotoStable } from './util.js';
 
 const SITE = 'https://canada.hibid.com';
 
@@ -72,7 +73,7 @@ export function createHibidSource() {
       lease = await acquireBrowser();
       page = await lease.context.newPage();
       // Prime Cloudflare cookies once; all searches then run same-origin.
-      await page.goto(`${SITE}/lots`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+      await gotoStable(page, `${SITE}/lots`);
       await page.waitForTimeout(2000);
     },
 

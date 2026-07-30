@@ -19,7 +19,7 @@ import { extractViewVars, parseMillerLots } from '../src/marketplace/sources/mil
 import { extractGoldinConfig, parseGoldinLots } from '../src/marketplace/sources/goldin.js';
 import { parseCatawikiLots } from '../src/marketplace/sources/catawiki.js';
 import { parsePristineJsonLd, extractLotArrays, mapPristineApiLot } from '../src/marketplace/sources/pristine.js';
-import { extractJsonLd, decodeEntities, withTimeout } from '../src/marketplace/sources/util.js';
+import { extractJsonLd, decodeEntities, withTimeout, gotoStable } from '../src/marketplace/sources/util.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -170,6 +170,55 @@ test('catawiki: joins search lots with bidding state, prefers USD quote, drops c
 
 test('util: decodeEntities handles named + numeric refs', () => {
   assert.equal(decodeEntities('PSA&nbsp;10&nbsp;GEM&#8209;MT &amp; more'), 'PSA 10 GEM‑MT & more');
+});
+
+test('util: gotoStable retries navigations aborted by a late redirect', async () => {
+  // Reproduces the live MySlabs failure: the previous results page fires its
+  // own navigation mid-goto.
+  const calls = [];
+  let attempt = 0;
+  const page = {
+    url: () => 'https://www.myslabs.com/search/slabs/?q=x',
+    waitForTimeout: async () => {},
+    goto: async (url) => {
+      calls.push(url);
+      if (++attempt === 1) {
+        throw new Error(
+          'page.goto: Navigation to "https://www.myslabs.com/auction/search/all/?q=x" is interrupted by another navigation to "https://www.myslabs.com/search/slabs/?q=x"'
+        );
+      }
+      return { status: () => 200 };
+    },
+  };
+  const res = await gotoStable(page, 'https://www.myslabs.com/auction/search/all/?q=x');
+  assert.equal(res.status(), 200);
+  assert.equal(calls.length, 2, 'retried once');
+});
+
+test('util: gotoStable accepts an interrupted nav that still landed on target', async () => {
+  const target = 'https://www.myslabs.com/search/slabs/?publish_type=0';
+  const page = {
+    url: () => 'https://www.myslabs.com/search/slabs/?other=1', // same path, different query
+    waitForTimeout: async () => {},
+    goto: async () => {
+      throw new Error('page.goto: net::ERR_ABORTED at ' + target);
+    },
+  };
+  assert.equal(await gotoStable(page, target), null); // treated as arrived
+});
+
+test('util: gotoStable rethrows non-navigation errors immediately', async () => {
+  let calls = 0;
+  const page = {
+    url: () => 'about:blank',
+    waitForTimeout: async () => {},
+    goto: async () => {
+      calls += 1;
+      throw new Error('net::ERR_NAME_NOT_RESOLVED');
+    },
+  };
+  await assert.rejects(() => gotoStable(page, 'https://nope.example/'), /NAME_NOT_RESOLVED/);
+  assert.equal(calls, 1, 'no pointless retries');
 });
 
 test('util: withTimeout rejects a stuck promise', async () => {

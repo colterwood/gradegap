@@ -7,7 +7,7 @@
 // Verify locally with `npm run test-source catawiki "jordan psa 10"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { saveDebug, debugLog } from './util.js';
+import { saveDebug, debugLog, gotoStable } from './util.js';
 
 const SITE = 'https://www.catawiki.com';
 
@@ -51,7 +51,7 @@ export function createCatawikiSource() {
       lease = await acquireBrowser();
       page = await lease.context.newPage();
       // Establish the PerimeterX session once; API calls then run same-origin.
-      await page.goto(`${SITE}/en/c/725-trading-cards`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+      await gotoStable(page, `${SITE}/en/c/725-trading-cards`);
       await page.waitForTimeout(2500);
     },
 

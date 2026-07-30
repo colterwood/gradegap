@@ -7,7 +7,7 @@
 // Verify locally with `npm run test-source goldin "jordan psa 10"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { toNumber, saveDebug, debugLog } from './util.js';
+import { toNumber, saveDebug, debugLog, gotoStable, parkPage } from './util.js';
 
 const SITE = 'https://goldin.co';
 
@@ -83,10 +83,10 @@ export function createGoldinSource() {
     async search({ text }) {
       // Both Goldin venues: /buy (auctions) and /fixed-price (marketplace).
       const sniffVenue = async (path, listingType, patienceSec) => {
+        await parkPage(page); // stop the previous venue's late redirects
         sniffed = [];
-        const ok = await page
-          .goto(`${SITE}${path}${encodeURIComponent(text)}`, { waitUntil: 'domcontentloaded', timeout: 45_000 })
-          .then((r) => (r?.status() ?? 0) < 400)
+        const ok = await gotoStable(page, `${SITE}${path}${encodeURIComponent(text)}`)
+          .then((r) => (r === null ? true : (r.status() ?? 0) < 400))
           .catch(() => false);
         if (!ok) {
           debugLog('goldin', `${path} navigation failed`);

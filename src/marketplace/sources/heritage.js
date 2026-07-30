@@ -7,7 +7,7 @@
 // `npm run test-source heritage "jordan psa 10"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { saveDebug, debugLog } from './util.js';
+import { saveDebug, debugLog, gotoStable } from './util.js';
 
 const SITE = 'https://sports.ha.com';
 
@@ -46,10 +46,7 @@ export function createHeritageSource() {
 
     async search({ text }) {
       const params = new URLSearchParams({ Ntt: text, mode: 'live', layout: 'list' });
-      await page.goto(`${SITE}/c/search-results.zx?${params}`, {
-        waitUntil: 'domcontentloaded',
-        timeout: 45_000,
-      });
+      await gotoStable(page, `${SITE}/c/search-results.zx?${params}`);
       await page.waitForTimeout(2000);
 
       // One .item-block per lot (usually an <li>); id = "{saleNo}-{itemId}".

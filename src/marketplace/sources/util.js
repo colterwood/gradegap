@@ -68,6 +68,36 @@ export function withTimeout(promise, ms, label = 'operation') {
   return Promise.race([promise, bomb]).finally(() => clearTimeout(timer));
 }
 
+// page.goto that survives a previous page's late client-side redirect.
+// Sites frequently schedule a self-navigation after load; if it fires while
+// we're navigating away, Playwright aborts our goto ("interrupted by another
+// navigation" / ERR_ABORTED). Both are transient, so retry — and if the
+// interrupted navigation actually landed on the target, accept it.
+export async function gotoStable(page, url, { timeout = 45_000, attempts = 3 } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message ?? err);
+      if (!/interrupted by another navigation|ERR_ABORTED|NS_BINDING_ABORTED/i.test(msg)) throw err;
+      // Did we end up there anyway?
+      try {
+        if (page.url().split('?')[0] === url.split('?')[0]) return null;
+      } catch { /* page detached */ }
+      await page.waitForTimeout(750 * attempt);
+    }
+  }
+  throw lastErr;
+}
+
+// Park the page so nothing from the last site is still pending before the
+// next navigation.
+export async function parkPage(page) {
+  await page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 10_000 }).catch(() => {});
+}
+
 // Minimal HTML entity decoding for scraped titles (&nbsp;, &#8209;, &amp;…).
 export function decodeEntities(s) {
   return String(s ?? '')
