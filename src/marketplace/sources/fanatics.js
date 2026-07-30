@@ -40,11 +40,26 @@ async function gql(query, variables = {}) {
 
 const AUCTION_RE = /WEEKLY|PREMIER|AUCTION/i;
 
-// Fanatics' own listing-URL shape isn't documented and a constructed
-// /listing/<uuid> link 404s (verified live). So: use a URL the payload
-// actually gives us, and otherwise link to a site search for the title —
-// a link that always resolves beats a deep link that doesn't.
+// Real listing URLs are /<segment>/<listingUuid>/<slug>, one segment per
+// marketplace (all three verified live 2026-07-30 by fetching constructed
+// URLs and checking the page actually carries the card title — the site
+// returns 200 for ANY path, so a status check alone proves nothing):
+//   WEEKLY  -> /weekly/…   PREMIER -> /premier/…   FIXED -> /buy-now/…
+// (/listing/, /fixed/ and /marketplace/ variants are wrong: 404 or a
+// redirect to the generic marketplace page.) Routing is by uuid — the slug
+// is cosmetic — but match the site's shape anyway.
+const MARKETPLACE_SEGMENT = { WEEKLY: 'weekly', PREMIER: 'premier', FIXED: 'buy-now', BUY_NOW: 'buy-now' };
+
+// Fanatics' slugs collapse each non-alphanumeric run to one dash:
+// "… Kobe Bryant #1HV SGC 9 MINT" -> "…-kobe-bryant-1hv-sgc-9-mint".
+export const fanaticsSlug = (title) =>
+  String(title ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
 export function buildFanaticsUrl(node) {
+  // A URL the payload hands us verbatim always wins.
   const direct =
     node.url ?? node.webUrl ?? node.permalink ?? node.canonicalUrl ?? node.href ?? node.path ?? null;
   if (typeof direct === 'string' && direct.trim()) {
@@ -54,7 +69,14 @@ export function buildFanaticsUrl(node) {
       /* fall through */
     }
   }
+  const uuid = node.listingUuid ?? node.uuid ?? node.id ?? null;
+  const segment = MARKETPLACE_SEGMENT[String(node.marketplace ?? node.listingType ?? '').toUpperCase()];
   const title = node.title ?? node.name ?? '';
+  if (uuid && segment) {
+    return `${SITE}/${segment}/${uuid}/${node.slug ?? fanaticsSlug(title)}`;
+  }
+  // Unknown marketplace value (schema drift): a search link that resolves
+  // beats a guessed deep link that 404s.
   return `${SITE}/search?query=${encodeURIComponent(String(title).slice(0, 120))}`;
 }
 
@@ -80,17 +102,21 @@ export function parseFanaticsAlgoliaHit(hit) {
   const centsKeys = isAuction
     ? ['currentBidAmountInCents', 'highestBidAmountInCents', 'startingPriceInCents', 'lowestPriceInCents', 'priceInCents']
     : ['buyNowPriceInCents', 'askingPriceInCents', 'lowestPriceInCents', 'priceInCents'];
+  // Live index fields (2026-07-30): auctions carry currentBid/currentPrice in
+  // DOLLARS, with startingBid as the no-bids-yet floor — a 0 current bid must
+  // fall through to it instead of showing "$0".
   const dollarKeys = isAuction
-    ? ['currentBid', 'highestBid', 'startingPrice', 'lowestPrice', 'price']
-    : ['buyNowPrice', 'askingPrice', 'lowestPrice', 'price'];
+    ? ['currentBid', 'currentPrice', 'highestBid', 'startingBid', 'startingPrice', 'lowestPrice', 'price']
+    : ['buyNowPrice', 'askingPrice', 'currentPrice', 'lowestPrice', 'price'];
   let price = null;
   for (const k of centsKeys) {
     if (hit[k] != null) { price = centsToDollars(toNumber(hit[k])); break; }
   }
-  if (price == null) {
+  if (price == null || price === 0) {
     for (const k of dollarKeys) {
       const v = toNumber(hit[k]);
-      if (v != null) { price = v; break; }
+      if (v != null && v > 0) { price = v; break; }
+      if (v != null && price == null) price = v; // keep a real 0 only if nothing beats it
     }
   }
 
@@ -102,8 +128,10 @@ export function parseFanaticsAlgoliaHit(hit) {
     price,
     currency: hit.currency ?? 'USD',
     listingType: isAuction ? 'auction' : 'fixed',
+    // auctionEndDatetime (epoch seconds) is the field the live index actually
+    // populates; the others are kept for schema drift.
     endsAt: isAuction
-      ? epochToIso(hit.auctionEndsAt ?? hit.endsAt ?? hit.endTime ?? hit.auction?.endsAt) ?? null
+      ? epochToIso(hit.auctionEndDatetime ?? hit.auctionEndsAt ?? hit.endsAt ?? hit.endTime ?? hit.auction?.endsAt) ?? null
       : null,
     imageUrl: hit.images?.primary?.small ?? hit.imageUrl ?? (typeof hit.image === 'string' ? hit.image : null),
     seller: null, // consignment model — no per-lot seller

@@ -49,9 +49,8 @@ test('fanatics: auction vs fixed, cents → dollars, end time', () => {
   assert.equal(auction.listingType, 'auction');
   assert.equal(auction.price, 45000);
   assert.equal(auction.endsAt, '2026-08-01T02:00:00Z');
-  // No payload URL field here, so it falls back to a site search link
-  // (a constructed /listing/<id> link 404s — verified live).
-  assert.match(auction.url, /^https:\/\/www\.fanaticscollect\.com\/search\?query=/);
+  // WEEKLY + id + slug -> the real /weekly/<uuid>/<slug> page (verified live).
+  assert.equal(auction.url, 'https://www.fanaticscollect.com/weekly/abc-123/1986-fleer-jordan');
 
   const fixed = parseFanaticsListing({
     id: 'def',
@@ -62,6 +61,9 @@ test('fanatics: auction vs fixed, cents → dollars, end time', () => {
   assert.equal(fixed.listingType, 'fixed');
   assert.equal(fixed.price, 99.99);
   assert.equal(fixed.endsAt, null);
+  // FIXED_PRICE isn't a known marketplace segment -> resolving search link,
+  // never a guessed deep link.
+  assert.match(fixed.url, /^https:\/\/www\.fanaticscollect\.com\/search\?query=/);
 });
 
 test('hibid: maps lots, prefers highBid, drops closed, carries house currency', () => {
@@ -270,6 +272,49 @@ test('fanatics: Algolia hits map tolerantly (cents, dollars, epoch ends)', () =>
   assert.equal(fixed.endsAt, null);
 
   assert.equal(parseFanaticsAlgoliaHit({ objectID: 'no-title' }), null);
+});
+
+test('fanatics: live-index field shapes — auctionEndDatetime, dollar bids, startingBid floor', () => {
+  // Field names exactly as the prod_item_state_v1 index returned them on
+  // 2026-07-30 (the user-reported Kobe card, abridged).
+  const kobe = parseFanaticsAlgoliaHit({
+    listingUuid: 'eed49848-852e-11f1-9b99-0a0f8b986c27',
+    listingId: 6246520,
+    objectID: 'WEEKLY6246520',
+    title: '1997 Hoops High Voltage Kobe Bryant #1HV SGC 9 MINT',
+    marketplace: 'WEEKLY',
+    currentBid: 725,
+    currentPrice: 725,
+    startingBid: 5,
+    auctionEndDatetime: 1785722400, // epoch seconds
+    status: 'Live',
+  });
+  assert.equal(kobe.listingType, 'auction');
+  assert.equal(kobe.price, 725);
+  assert.equal(kobe.endsAt, new Date(1785722400 * 1000).toISOString());
+  // The exact URL the user verified by hand on the live site.
+  assert.equal(
+    kobe.url,
+    'https://www.fanaticscollect.com/weekly/eed49848-852e-11f1-9b99-0a0f8b986c27/1997-hoops-high-voltage-kobe-bryant-1hv-sgc-9-mint'
+  );
+
+  // A no-bids auction must fall through 0 to the startingBid floor.
+  const noBids = parseFanaticsAlgoliaHit({
+    listingUuid: 'u-3',
+    title: 'Card A',
+    marketplace: 'WEEKLY',
+    currentBid: 0,
+    startingBid: 5,
+  });
+  assert.equal(noBids.price, 5);
+
+  // All three marketplace segments (each verified live 2026-07-30).
+  const premier = parseFanaticsAlgoliaHit({ listingUuid: 'u-4', title: 'Card B', marketplace: 'PREMIER', currentBid: 100 });
+  assert.equal(premier.url, 'https://www.fanaticscollect.com/premier/u-4/card-b');
+  assert.equal(premier.listingType, 'auction');
+  const buyNow = parseFanaticsAlgoliaHit({ listingUuid: 'u-5', title: 'Card C', marketplace: 'FIXED', buyNowPrice: 50 });
+  assert.equal(buyNow.url, 'https://www.fanaticscollect.com/buy-now/u-5/card-c');
+  assert.equal(buyNow.listingType, 'fixed');
 });
 
 test('hibid: zero-bid lots report null price, not $0', () => {
@@ -524,12 +569,12 @@ test('alt: near-miss diagnostic surfaces rejected card-ish objects and their key
   assert.ok(misses[0].keys.includes('itemTitle') && misses[0].keys.includes('lowestOffer'));
 });
 
-test('fanatics: URLs come from the payload, else a search link (never a 404 guess)', async () => {
-  const { buildFanaticsUrl, parseFanaticsAlgoliaHit } = await import('../src/marketplace/sources/fanatics.js');
+test('fanatics: payload URL wins; known marketplace builds a deep link; unknown falls to search', async () => {
+  const { buildFanaticsUrl, fanaticsSlug, parseFanaticsAlgoliaHit } = await import('../src/marketplace/sources/fanatics.js');
 
-  // A URL the API actually gave us wins
+  // A URL the API actually gave us wins even over a buildable deep link
   assert.equal(
-    buildFanaticsUrl({ url: 'https://www.fanaticscollect.com/weekly-auction/x_123' }),
+    buildFanaticsUrl({ url: 'https://www.fanaticscollect.com/weekly-auction/x_123', listingUuid: 'u', marketplace: 'WEEKLY', title: 't' }),
     'https://www.fanaticscollect.com/weekly-auction/x_123'
   );
   assert.equal(
@@ -537,16 +582,31 @@ test('fanatics: URLs come from the payload, else a search link (never a 404 gues
     'https://www.fanaticscollect.com/weekly-auction/x_123'
   );
 
-  // Live bug: /listing/<uuid> 404s, so a bare uuid must NOT become a link
+  // Known marketplace + uuid -> the real /buy-now/<uuid>/<slug> deep link
   const hit = parseFanaticsAlgoliaHit({
     listingUuid: 'a741a966-8b92-11f1-9b47-02ffd3767c89',
     title: '1986 Fleer Michael Jordan #57 PSA 8',
     marketplace: 'FIXED',
     buyNowPrice: 500,
   });
-  assert.ok(!hit.url.includes('a741a966'), 'no constructed /listing/<uuid> link');
-  assert.match(hit.url, /^https:\/\/www\.fanaticscollect\.com\/search\?query=/);
-  assert.match(hit.url, /Michael/);
+  assert.equal(
+    hit.url,
+    'https://www.fanaticscollect.com/buy-now/a741a966-8b92-11f1-9b47-02ffd3767c89/1986-fleer-michael-jordan-57-psa-8'
+  );
+
+  // Unknown marketplace -> a search link that resolves, never a 404 guess
+  const unknown = parseFanaticsAlgoliaHit({
+    listingUuid: 'u-9',
+    title: 'Mystery Card',
+    marketplace: 'SOMETHING_NEW',
+    price: 5,
+  });
+  assert.match(unknown.url, /^https:\/\/www\.fanaticscollect\.com\/search\?query=/);
+  assert.match(unknown.url, /Mystery/);
+
+  // Slug shape: every non-alphanumeric run collapses to ONE dash
+  assert.equal(fanaticsSlug('1997 Hoops High Voltage Kobe Bryant #1HV SGC 9 MINT'), '1997-hoops-high-voltage-kobe-bryant-1hv-sgc-9-mint');
+  assert.equal(fanaticsSlug('  NAT. VIP #6  '), 'nat-vip-6');
 });
 
 test('alt: Typesense hit wrappers are unwrapped (the live parse failure)', async () => {
