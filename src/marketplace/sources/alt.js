@@ -111,7 +111,16 @@ export function createAltSource() {
 
     async search({ text }) {
       const q = encodeURIComponent(text);
-      const candidates = [`${SITE}/buy?search=${q}`, `${SITE}/marketplace?search=${q}`, `${SITE}/buy?q=${q}`];
+      // Alt splits its buy side into All items / Auction / Fixed price. We
+      // want the ALL view — one page load covers both, and each listing's
+      // own payload says which it is (see mapAltListing). The later
+      // candidates are fallbacks in case the search route differs.
+      const candidates = [
+        `${SITE}/buy?search=${q}`,
+        `${SITE}/buy?search=${q}&tab=all`,
+        `${SITE}/marketplace?search=${q}`,
+        `${SITE}/buy?q=${q}`,
+      ];
 
       for (const url of candidates) {
         await parkPage(page);
