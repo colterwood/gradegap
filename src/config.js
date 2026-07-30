@@ -59,7 +59,9 @@ export const config = {
   // converted at daily rates.
   watchIntervalMin: intEnv('WATCH_INTERVAL_MIN', 30),
   watchRemindMin: intEnv('WATCH_REMIND_MIN', 1440),
-  watchSources: listEnv('WATCH_SOURCES', 'ebay'),
+  // 'all' = every adapter in the source registry (the default). Sources
+  // missing setup are skipped with a reason, so this is safe.
+  watchSources: listEnv('WATCH_SOURCES', 'all'),
   ebayClientId: process.env.EBAY_CLIENT_ID || '',
   ebayClientSecret: process.env.EBAY_CLIENT_SECRET || '',
   ebayEnv: process.env.EBAY_ENV || 'production',

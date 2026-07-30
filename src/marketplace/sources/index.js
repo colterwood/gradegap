@@ -31,15 +31,23 @@ export const REGISTRY = {
   miller: async () => (await import('./miller.js')).createMillerSource(),
 };
 
+// WATCH_SOURCES=all (the default) means every adapter in the registry.
+// Sources missing their setup are skipped with a reason by the runner, and
+// a failing source never affects the others, so "all" is a safe default.
+export function resolveSourceNames(requested) {
+  if (!requested || requested.length === 0 || requested.includes('all')) return Object.keys(REGISTRY);
+  return requested;
+}
+
 export async function createMarketplaceSources() {
   if (config.mock) {
     const { createMockMarketSource } = await import('./mockMarket.js');
     return [createMockMarketSource()];
   }
   const sources = [];
-  for (const name of config.watchSources) {
+  for (const name of resolveSourceNames(config.watchSources)) {
     const make = REGISTRY[name];
-    if (!make) throw new Error(`unknown watch source "${name}" — valid: ${Object.keys(REGISTRY).join(', ')}`);
+    if (!make) throw new Error(`unknown watch source "${name}" — valid: all, ${Object.keys(REGISTRY).join(', ')}`);
     sources.push(await make());
   }
   return sources;
