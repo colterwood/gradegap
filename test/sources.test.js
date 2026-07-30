@@ -588,3 +588,18 @@ test('alt: Typesense hit wrappers are unwrapped (the live parse failure)', async
   assert.equal(listings[1].price, null); // kept on card fields alone
   assert.match(listings[1].title, /Molten Metal/);
 });
+
+test('alt: only responses whose REQUEST carried the query count as results', async () => {
+  const { requestCarriesQuery } = await import('../src/marketplace/sources/alt.js');
+  const ts = 'https://tlzfv6xaq81nhsbyp.a1.typesense.net/multi_search?collection=production_universal_search';
+
+  // query in the POST body (the normal case)
+  assert.ok(requestCarriesQuery(ts, '{"searches":[{"q":"jordan psa","per_page":50}]}', 'jordan psa'));
+  // query in the URL (the per_page=0 count calls)
+  assert.ok(requestCarriesQuery(`${ts}&per_page=0&q=jordan+psa`, '', 'jordan psa'));
+  // the unfiltered browse-grid query — live bug returned Curry/Brady/Messi
+  assert.ok(!requestCarriesQuery(ts, '{"searches":[{"q":"*","sort_by":"price:desc"}]}', 'jordan psa'));
+  assert.ok(!requestCarriesQuery(ts, '', 'jordan psa'));
+  // partial match is not enough
+  assert.ok(!requestCarriesQuery(ts, '{"q":"jordan"}', 'jordan psa'));
+});

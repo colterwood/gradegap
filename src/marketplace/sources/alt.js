@@ -15,6 +15,17 @@ const SITE = 'https://alt.xyz';
 // production_universal_search and prod_asset collections.
 const SEARCH_BACKEND_RE = /typesense\.net|\/multi_search|algolia|\/search/i;
 
+// Did this request actually carry our query? The browse page also fires
+// UNFILTERED grid/trending queries to the same backend (verified live:
+// merging those returned the whole high-price browse grid), so a response
+// only counts as search results when every query token appears in its
+// request URL or POST body. Exported for tests.
+export function requestCarriesQuery(url, postData, text) {
+  const haystack = decodeURIComponent(`${url}\n${postData ?? ''}`).toLowerCase();
+  const tokens = String(text).toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+  return tokens.length > 0 && tokens.every((t) => haystack.includes(t));
+}
+
 // The homepage search bar reads "Search by name or cert #".
 const SEARCH_INPUTS = [
   'input[placeholder*="Search by name" i]',
@@ -183,7 +194,9 @@ export function createAltSource() {
           if (!ct.includes('json')) return;
           const body = await res.text().catch(() => '');
           if (!body || (body[0] !== '{' && body[0] !== '[')) return;
-          sniffed.push({ url, json: JSON.parse(body) });
+          // The query usually travels in the POST body, not the URL.
+          const postData = res.request()?.postData() ?? '';
+          sniffed.push({ url, postData, json: JSON.parse(body) });
         } catch {
           // aborted/detached/bad URL — ignore
         }
@@ -231,15 +244,23 @@ export function createAltSource() {
 
       const seen = new Set();
       const out = [];
-      for (const { url: apiUrl, json } of sniffed) {
+      let ignoredUnqueried = 0;
+      for (const { url: apiUrl, postData, json } of sniffed) {
+        // Only responses to requests that carried OUR query — the page also
+        // loads its unfiltered browse/trending grid from the same backend.
+        if (!requestCarriesQuery(apiUrl, postData, text)) {
+          ignoredUnqueried += 1;
+          continue;
+        }
         for (const group of extractAltListings(json)) {
           if (group.length === 0) continue;
-          debugLog('alt', `listing-shaped JSON from ${apiUrl} → ${group.length}`);
+          debugLog('alt', `query-matched JSON from ${apiUrl.split('?')[0]} → ${group.length}`);
           for (const l of group) {
             if (!seen.has(l.listingId) && seen.add(l.listingId)) out.push(l);
           }
         }
       }
+      if (ignoredUnqueried > 0) debugLog('alt', `ignored ${ignoredUnqueried} responses whose requests lacked the query`);
       const backendHits = sniffed
         .filter((s) => SEARCH_BACKEND_RE.test(s.url))
         .map((s) => {
