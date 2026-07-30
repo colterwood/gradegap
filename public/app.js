@@ -617,7 +617,8 @@ function matchSortValue(m, col) {
 function renderMatches(all) {
   for (const m of all) m._deal = dealDot(m);
   // "Hide low-confidence" hides sub-50% scores from view (they stay in the
-  // DB and reappear if unchecked).
+  // DB and reappear if unchecked). Ended/dismissed listings never reach here
+  // at all — they're deleted server-side the moment they're confirmed gone.
   const matches = $('hide-low').checked
     ? all.filter((m) => m.match_score == null || m.match_score >= 0.5)
     : [...all];
@@ -640,7 +641,6 @@ function renderMatches(all) {
   tbody.innerHTML = '';
   for (const m of matches) {
     const tr = document.createElement('tr');
-    if (m.status === 'ended' || m.status === 'dismissed') tr.classList.add('listing-inactive');
     const title = m.url
       ? `<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>`
       : esc(m.title);
@@ -660,7 +660,7 @@ function renderMatches(all) {
       <td>${m.listing_type === 'auction' ? 'Auction' : 'Buy It Now'}</td>
       <td>${ends}</td>
       <td class="num">${low ? `<span class="score-low" title="Low-confidence match — verify before trusting">${score}</span>` : score}</td>
-      <td>${m.status === 'dismissed' ? '' : `<button class="link-btn match-dismiss" data-id="${m.id}">Dismiss</button>`}</td>
+      <td><button class="link-btn match-dismiss" data-id="${m.id}">Dismiss</button></td>
     `;
     tbody.appendChild(tr);
   }
@@ -672,10 +672,8 @@ function renderMatches(all) {
   if (matches.length === 0) {
     empty.textContent = 'No listings matched yet — hit Check now, or wait for the next scheduled check.';
   }
-  const live = matches.filter((m) => m.status === 'new' || m.status === 'notified').length;
   const hidden = all.length - matches.length;
-  $('matches-summary').textContent = `${live} live listing${live === 1 ? '' : 's'}` +
-    (matches.length !== live ? ` · ${matches.length - live} ended/dismissed shown` : '') +
+  $('matches-summary').textContent = `${matches.length} live listing${matches.length === 1 ? '' : 's'}` +
     (hidden > 0 ? ` · ${hidden} low-confidence hidden` : '');
 }
 
@@ -747,8 +745,7 @@ $('add-watch').addEventListener('submit', async (e) => {
 });
 
 async function loadListingsView() {
-  const statuses = $('show-ended').checked ? 'new,notified,dismissed,ended' : 'new,notified';
-  currentMatches = await api(`/api/matches?status=${statuses}`);
+  currentMatches = await api('/api/matches?status=new,notified');
   renderMatches(currentMatches);
   await refreshWatchBadge();
 }
@@ -812,8 +809,7 @@ document.querySelector('#matches-table tbody').addEventListener('click', async (
   }
 });
 
-$('show-ended').addEventListener('change', () => loadListingsView().catch((err) => setError(err.message)));
-$('hide-low').addEventListener('change', () => loadListingsView().catch((err) => setError(err.message)));
+$('hide-low').addEventListener('change', () => renderMatches(currentMatches));
 
 // --- check-now + status ---
 

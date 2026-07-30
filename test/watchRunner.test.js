@@ -48,12 +48,15 @@ test('check finds, scores, and stores matching listings; hard failures are dropp
   const run = q.getWatchRun.get(runId);
   assert.equal(run.status, 'completed');
   assert.equal(run.items_failed, 0);
-  assert.equal(run.new_listings, 4);
+  assert.equal(run.new_listings, 3);
 
-  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|dismissed|ended|', limit: 50 });
+  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
   const ids = stored.map((l) => l.listing_id).sort();
-  // wrong grade (SGC 9), wrong grader (PSA 10), wrong player (Bird) never stored
-  assert.deepEqual(ids, ['mkt-auction-1', 'mkt-ended-auction', 'mkt-fixed-cad', 'mkt-reprint']);
+  // wrong grade (SGC 9), wrong grader (PSA 10), wrong player (Bird) never
+  // stored; the long-ended auction is found by the search but never even
+  // inserted — its captured end date is already in the past on first sight.
+  assert.deepEqual(ids, ['mkt-auction-1', 'mkt-fixed-cad', 'mkt-reprint']);
+  assert.equal(q.getListingByKey.get('mockmarket', 'mkt-ended-auction'), undefined);
 
   // the reprint survives but with a visibly low confidence score
   const reprint = stored.find((l) => l.listing_id === 'mkt-reprint');
@@ -65,8 +68,6 @@ test('check finds, scores, and stores matching listings; hard failures are dropp
   assert.equal(cad.currency, 'CAD');
   assert.ok(cad.price_usd > 20000 && cad.price_usd < 36000, `price_usd ${cad.price_usd}`);
 
-  // the long-ended auction was swept to 'ended' by the post-run pass
-  assert.equal(stored.find((l) => l.listing_id === 'mkt-ended-auction').status, 'ended');
   // pushes are disabled, so live matches stay 'new'
   assert.equal(stored.find((l) => l.listing_id === 'mkt-auction-1').status, 'new');
   assert.equal(runner.status().newCount, 3);
@@ -96,7 +97,7 @@ test('max_price caps new listings in USD', async () => {
   const { q, runner, watch } = await freshWatched({ maxPrice: 1000 });
   await runner.start({});
   await waitUntilDone(runner);
-  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|dismissed|ended|', limit: 50 });
+  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
   // only the $49 reprint sneaks under a $1,000 cap
   assert.deepEqual(stored.map((l) => l.listing_id), ['mkt-reprint']);
 });
@@ -130,9 +131,36 @@ test('reminder window and staleness queries behave', async () => {
   q.markListingReminded.run(due[0].id);
   assert.equal(q.reminderCandidates.all({ minutes: 1440 }).length, 0);
 
-  // A fixed listing that misses 3 consecutive checks is swept to 'ended'.
+  // A fixed listing that misses 3 consecutive checks is deleted outright.
   db.prepare(`UPDATE listings SET misses = 3 WHERE listing_id = 'mkt-fixed-cad'`).run();
-  q.markStaleListingsEnded.run();
-  const cad = q.getListingByKey.get('mockmarket', 'mkt-fixed-cad');
-  assert.equal(cad.status, 'ended');
+  q.deleteStaleListings.run();
+  assert.equal(q.getListingByKey.get('mockmarket', 'mkt-fixed-cad'), undefined);
+});
+
+test('dismissing a listing deletes it and blocks it from ever coming back', async () => {
+  const { db, q, runner, watch } = await freshWatched();
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  const reprint = q.getListingByKey.get('mockmarket', 'mkt-reprint');
+  assert.ok(reprint, 'reprint was matched on the first check');
+
+  const listing = q.getListingById.get(reprint.id);
+  db.transaction(() => {
+    q.insertDismissedListing.run({
+      watchId: listing.watch_id,
+      source: listing.source,
+      listingId: listing.listing_id,
+      canonicalKey: listing.canonical_key,
+    });
+    q.deleteListing.run(listing.id);
+  })();
+  assert.equal(q.getListingByKey.get('mockmarket', 'mkt-reprint'), undefined);
+
+  // Same source item resurfaces on the next check — must not be re-inserted.
+  await runner.start({});
+  await waitUntilDone(runner);
+  assert.equal(q.getListingByKey.get('mockmarket', 'mkt-reprint'), undefined);
+  const stored = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50 });
+  assert.ok(!stored.some((l) => l.listing_id === 'mkt-reprint'));
 });

@@ -18,6 +18,7 @@ export function openDb(dbPath = path.join(config.dataDir, 'gradegap.db')) {
   // TABLE IF NOT EXISTS won't alter a table that predates a new column).
   ensureColumn(db, 'grade_prices', 'population', 'INTEGER');
   ensureColumn(db, 'grade_prices', 'num_sales', 'INTEGER');
+  purgeDismissedAndEndedListings(db);
   db.pragma('foreign_keys = ON');
   return db;
 }
@@ -67,6 +68,20 @@ function migrateWatchesForManual(db) {
 function ensureColumn(db, table, column, type) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
   if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+
+// One-time-per-DB cleanup for rows written before dismissed/ended listings
+// were deleted outright (2026-07-30): move any 'dismissed' rows into the
+// permanent blocklist first, then drop both statuses. A no-op once a DB has
+// no such rows left, so it's cheap to run on every startup.
+function purgeDismissedAndEndedListings(db) {
+  const cols = db.prepare(`PRAGMA table_info(listings)`).all().map((c) => c.name);
+  if (!cols.includes('status')) return; // fresh DB, schema.sql just built it clean
+  db.exec(`
+    INSERT OR IGNORE INTO dismissed_listings (watch_id, source, listing_id, canonical_key)
+      SELECT watch_id, source, listing_id, canonical_key FROM listings WHERE status = 'dismissed';
+    DELETE FROM listings WHERE status IN ('dismissed', 'ended');
+  `);
 }
 
 export function syncPlayersFromConfig(db, players) {

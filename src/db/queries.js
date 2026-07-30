@@ -261,8 +261,22 @@ export function makeQueries(db) {
     deleteWatchItems: db.prepare(`DELETE FROM watch_check_items WHERE watch_id = ?`),
     deleteWatch: db.prepare(`DELETE FROM watches WHERE id = ?`),
 
+    getListingById: db.prepare(`SELECT * FROM listings WHERE id = ?`),
     getListingByKey: db.prepare(`SELECT * FROM listings WHERE source = ? AND listing_id = ?`),
     getListingByCanonical: db.prepare(`SELECT * FROM listings WHERE canonical_key = ?`),
+    deleteListing: db.prepare(`DELETE FROM listings WHERE id = ?`),
+
+    // The permanent dismiss blocklist — checked before a "new" sighting is
+    // ever inserted, so a rejected listing can't come back under the same
+    // source id or canonical key. Not scoped to a watch (see schema.sql).
+    getDismissedByKey: db.prepare(`SELECT 1 FROM dismissed_listings WHERE source = ? AND listing_id = ?`),
+    getDismissedByCanonical: db.prepare(`SELECT 1 FROM dismissed_listings WHERE canonical_key = ?`),
+    insertDismissedListing: db.prepare(`
+      INSERT INTO dismissed_listings (watch_id, source, listing_id, canonical_key)
+      VALUES (@watchId, @source, @listingId, @canonicalKey)
+      ON CONFLICT(source, listing_id) DO UPDATE SET dismissed_at = datetime('now')
+    `),
+    deleteWatchDismissed: db.prepare(`DELETE FROM dismissed_listings WHERE watch_id = ?`),
     insertListing: db.prepare(`
       INSERT INTO listings (watch_id, source, listing_id, canonical_key, title, url, price, currency,
                             price_usd, listing_type, ends_at, image_url, seller, match_score, match_debug)
@@ -302,21 +316,24 @@ export function makeQueries(db) {
     countActiveMatches: db.prepare(`SELECT COUNT(*) AS n FROM listings WHERE status IN ('new','notified')`),
     setListingStatus: db.prepare(`UPDATE listings SET status = ? WHERE id = ?`),
     listNewListings: db.prepare(`SELECT * FROM listings WHERE status = 'new' ORDER BY id`),
-    markEndedAuctions: db.prepare(`
-      UPDATE listings SET status = 'ended'
+    // An auction with a captured end date in the past is confidently gone —
+    // deleted outright, not just flagged. An auction whose end date we never
+    // captured (ends_at NULL) is deliberately left alone: we're not sure.
+    deleteEndedAuctions: db.prepare(`
+      DELETE FROM listings
       WHERE listing_type = 'auction' AND ends_at IS NOT NULL AND ends_at < datetime('now')
         AND status IN ('new','notified')
     `),
     // Staleness for fixed-price listings (they never "end" on their own): a
     // successful (watch, source) check that didn't see a listing bumps its
-    // miss counter; 3 consecutive misses = sold/delisted.
+    // miss counter; 3 consecutive misses = confidently sold/delisted, deleted.
     bumpListingMisses: db.prepare(`
       UPDATE listings SET misses = misses + 1
       WHERE watch_id = @watchId AND source = @source AND listing_type = 'fixed'
         AND status IN ('new','notified') AND last_seen_at < @runStartedAt
     `),
-    markStaleListingsEnded: db.prepare(`
-      UPDATE listings SET status = 'ended' WHERE misses >= 3 AND status IN ('new','notified')
+    deleteStaleListings: db.prepare(`
+      DELETE FROM listings WHERE misses >= 3 AND status IN ('new','notified')
     `),
     // Auctions entering the ending-soon window that haven't had their
     // reminder push yet. @minutes is concatenated into the datetime modifier

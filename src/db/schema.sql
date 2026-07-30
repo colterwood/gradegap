@@ -84,11 +84,15 @@ CREATE TABLE IF NOT EXISTS watches (
   UNIQUE(card_id, grading_company, grade)
 );
 
--- Every marketplace listing that ever matched a watch. Rows are kept after a
--- listing ends so history stays visible. One listing = one row: dedupe is
--- (source, listing_id), plus canonical_key for the same item surfacing via
--- two sources (e.g. an eBay listing mirrored by an aggregator) — first watch
--- to match keeps the row, later sightings just refresh price/last_seen_at.
+-- Every LIVE marketplace listing matching a watch. A row is deleted (not just
+-- flagged) once it's confidently gone: an auction past its captured end date,
+-- or a fixed listing that's missed 3 consecutive checks. A listing whose end
+-- date we failed to capture is never auto-removed this way — status stays
+-- 'new'/'notified' until a source finally reports a real end date or enough
+-- misses accrue. One listing = one row: dedupe is (source, listing_id), plus
+-- canonical_key for the same item surfacing via two sources (e.g. an eBay
+-- listing mirrored by an aggregator) — first watch to match keeps the row,
+-- later sightings just refresh price/last_seen_at.
 CREATE TABLE IF NOT EXISTS listings (
   id             INTEGER PRIMARY KEY,
   watch_id       INTEGER NOT NULL REFERENCES watches(id),
@@ -107,13 +111,30 @@ CREATE TABLE IF NOT EXISTS listings (
   match_score    REAL,
   match_debug    TEXT,
   status         TEXT NOT NULL DEFAULT 'new'
-                 CHECK (status IN ('new','notified','dismissed','ended')),
+                 CHECK (status IN ('new','notified')),
   reminder_sent  INTEGER NOT NULL DEFAULT 0,
   misses         INTEGER NOT NULL DEFAULT 0,
   found_at       TEXT NOT NULL DEFAULT (datetime('now')),
   last_seen_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(source, listing_id)
 );
+
+-- A listing a user explicitly rejected as a bad match. Kept even after the
+-- listings row itself is deleted, so the exact same source item is never
+-- re-surfaced as 'new' on a later check. Keyed like listings' own dedupe
+-- (source, listing_id) plus canonical_key, deliberately NOT scoped to a
+-- watch: a bad match is a bad match regardless of which watch found it.
+CREATE TABLE IF NOT EXISTS dismissed_listings (
+  id             INTEGER PRIMARY KEY,
+  watch_id       INTEGER NOT NULL REFERENCES watches(id),
+  source         TEXT NOT NULL,
+  listing_id     TEXT NOT NULL,
+  canonical_key  TEXT,
+  dismissed_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(source, listing_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dismissed_canonical
+  ON dismissed_listings(canonical_key) WHERE canonical_key IS NOT NULL;
 
 -- Work queue for one check cycle, mirroring sync_runs/sync_items: one item
 -- per (watch, source) so an interrupted check resumes with only its pending

@@ -74,6 +74,20 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
           url: raw.url ?? null,
         });
       } else {
+        // Never resurrect a listing the user explicitly rejected, however it
+        // resurfaces (same source id, or the same physical item's canonical
+        // key via another search).
+        const dismissed =
+          q.getDismissedByKey.get(sourceName, String(raw.listingId)) ??
+          (canonicalKey ? q.getDismissedByCanonical.get(canonicalKey) : undefined);
+        if (dismissed) continue;
+        // A stale search index can still return an auction whose captured end
+        // date already passed — that's not a "new" listing, it's an old one
+        // surfacing for the first time after it's over. Skip it outright
+        // instead of inserting it only for the post-run pass to delete it
+        // right back out.
+        const endsAtMs = raw.listingType === 'auction' && raw.endsAt ? Date.parse(raw.endsAt) : NaN;
+        if (!Number.isNaN(endsAtMs) && endsAtMs < Date.now()) continue;
         if (watch.max_price != null && priceUsd != null && priceUsd > watch.max_price) continue;
         q.insertListing.run({
           watchId: watch.id,
@@ -293,8 +307,8 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
           await processSource(source, bySource.get(source.name), watchById, runId, runStartedAt);
         }
 
-        q.markEndedAuctions.run();
-        q.markStaleListingsEnded.run();
+        q.deleteEndedAuctions.run();
+        q.deleteStaleListings.run();
         await notifyAfterRun();
 
         q.finishWatchRun.run({ id: runId, status: cancelRequested ? 'cancelled' : 'completed', error: null });

@@ -71,15 +71,17 @@ export function makeWatchRouter(db, q, watchRunner) {
     res.json({ ok: true, watch: q.getWatch.get(id) });
   });
 
-  // Deleting a watch also deletes its listing history (unwatching from the
-  // results table checkbox lands here). Pausing without losing history is
-  // what the enabled toggle is for.
+  // Deleting a watch also deletes its listing history and dismiss blocklist
+  // (unwatching from the results table checkbox lands here) — a re-added
+  // watch starts fresh. Pausing without losing history is what the enabled
+  // toggle is for.
   router.delete('/watches/:id', (req, res) => {
     const id = Number(req.params.id);
     if (!q.getWatch.get(id)) return res.status(404).json({ ok: false, error: 'no such watch' });
     db.transaction(() => {
       q.deleteWatchListings.run(id);
       q.deleteWatchItems.run(id);
+      q.deleteWatchDismissed.run(id);
       q.deleteWatch.run(id);
     })();
     res.json({ ok: true });
@@ -88,14 +90,28 @@ export function makeWatchRouter(db, q, watchRunner) {
   router.get('/matches', (req, res) => {
     const statuses = (req.query.status ? String(req.query.status).split(',') : ['new', 'notified'])
       .map((s) => s.trim())
-      .filter((s) => ['new', 'notified', 'dismissed', 'ended'].includes(s));
+      .filter((s) => ['new', 'notified'].includes(s));
     const watchId = parseInt(req.query.watchId, 10) || null;
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
     res.json(q.listMatches.all({ watchId, statuses: `|${statuses.join('|')}|`, limit }));
   });
 
+  // Dismissing deletes the listing outright and remembers it permanently in
+  // dismissed_listings, so this exact listing (by source id or canonical
+  // key) can never be re-inserted as 'new' on a later check.
   router.post('/matches/:id/dismiss', (req, res) => {
-    q.setListingStatus.run('dismissed', Number(req.params.id));
+    const id = Number(req.params.id);
+    const listing = q.getListingById.get(id);
+    if (!listing) return res.status(404).json({ ok: false, error: 'no such listing' });
+    db.transaction(() => {
+      q.insertDismissedListing.run({
+        watchId: listing.watch_id,
+        source: listing.source,
+        listingId: listing.listing_id,
+        canonicalKey: listing.canonical_key,
+      });
+      q.deleteListing.run(id);
+    })();
     res.json({ ok: true });
   });
 
