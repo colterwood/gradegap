@@ -488,3 +488,17 @@ test('alt: telemetry hosts are blocked, search backends are not', async () => {
     assert.ok(!ANALYTICS_HOST_RE.test(h), h);
   }
 });
+
+test('alt: only Alt-listed items are kept, not the houses it aggregates', async () => {
+  const { mapAltListing, isAltsOwnListing } = await import('../src/marketplace/sources/alt.js');
+  const card = { id: 'a1', title: '1986 Fleer Michael Jordan #57 PSA 8', price: 12500 };
+
+  assert.ok(mapAltListing({ ...card, auctionHouse: 'Alt' }));
+  assert.ok(mapAltListing({ ...card, auctionHouse: { name: 'Alt' } }));
+  assert.ok(mapAltListing(card), 'no house field -> URL filter already applied');
+
+  for (const house of ['Goldin', 'Heritage Auctions', 'Fanatics Collect', 'PWCC']) {
+    assert.equal(mapAltListing({ ...card, auctionHouse: house }), null, house);
+    assert.equal(isAltsOwnListing({ auctionHouse: house }), false, house);
+  }
+});

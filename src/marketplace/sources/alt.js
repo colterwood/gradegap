@@ -45,9 +45,26 @@ export const ANALYTICS_HOST_RE =
 // auction-cycle date ranges and analytics survey definitions.
 const CARD_TITLE_RE = /\b(19|20)\d{2}\b|\b(psa|bgs|sgc|cgc|csg)\b|#\s*\w+/i;
 
+// Alt surfaces other auction houses' listings alongside its own. Keep only
+// Alt's: if a payload names a house and it isn't Alt, drop it (an absent
+// field is fine — the auctionHouse=Alt URL filter already applied).
+const HOUSE_KEYS = ['auctionHouse', 'auction_house', 'house', 'marketplace', 'platform', 'sourceName', 'source'];
+
+export function isAltsOwnListing(o) {
+  for (const k of HOUSE_KEYS) {
+    const v = o?.[k];
+    const name = typeof v === 'string' ? v : v?.name ?? v?.displayName;
+    if (typeof name === 'string' && name.trim()) {
+      return /^alt(\.xyz)?$/i.test(name.trim());
+    }
+  }
+  return true;
+}
+
 // Pure, fixture-testable: one Alt API object → normalized listing or null.
 export function mapAltListing(o) {
   if (!o || typeof o !== 'object') return null;
+  if (!isAltsOwnListing(o)) return null;
   const id = o.id ?? o.listingId ?? o.assetId ?? o.uuid ?? o.slug;
   const title =
     o.title ?? o.name ?? o.cardName ?? o.card_name ?? o.displayName ?? o.description ?? null;
@@ -119,15 +136,16 @@ export function createAltSource() {
 
     async search({ text }) {
       const q = encodeURIComponent(text);
-      // Alt splits its buy side into All items / Auction / Fixed price. We
-      // want the ALL view — one page load covers both, and each listing's
-      // own payload says which it is (see mapAltListing). The later
-      // candidates are fallbacks in case the search route differs.
+      // /browse with auctionHouse=Alt is the view of items listed ON Alt —
+      // the site also aggregates other houses' listings, which we don't
+      // want here (they're covered by their own adapters, or not at all).
+      // This one view spans both auction and fixed price; each listing's
+      // payload says which it is (see mapAltListing).
       const candidates = [
+        `${SITE}/browse?auctionHouse=Alt&search=${q}&sortBy=ending_soonest_asc`,
+        `${SITE}/browse?auctionHouse=Alt&q=${q}`,
+        `${SITE}/browse?search=${q}`,
         `${SITE}/buy?search=${q}`,
-        `${SITE}/buy?search=${q}&tab=all`,
-        `${SITE}/marketplace?search=${q}`,
-        `${SITE}/buy?q=${q}`,
       ];
 
       for (const url of candidates) {
