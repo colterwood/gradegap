@@ -1,4 +1,6 @@
 import express from 'express';
+import { appendFileSync } from 'node:fs';
+import path from 'node:path';
 import { config } from './config.js';
 import { openDb } from './db/db.js';
 import { makeQueries } from './db/queries.js';
@@ -6,6 +8,24 @@ import { createSyncManager } from './sync/syncRunner.js';
 import { createWatchRunner } from './marketplace/watchRunner.js';
 import { makeApiRouter } from './routes/api.js';
 import { makeWatchRouter } from './routes/watchApi.js';
+
+// Last-resort guards. Node's default for an unhandled rejection is to KILL
+// the process — one stray async error in a scraper event handler or a
+// notification push would take the whole server down mid-check, with the
+// stack lost unless someone was watching the terminal. Log loudly, append
+// to data/errors.log (survives the console), and keep serving: for a local
+// single-user app, staying up beats dying silently.
+function logFatal(kind, err) {
+  const line = `[${new Date().toISOString()}] ${kind}: ${err?.stack ?? err}\n`;
+  console.error(line.trimEnd());
+  try {
+    appendFileSync(path.join(config.dataDir, 'errors.log'), line);
+  } catch {
+    /* data dir missing — console already has it */
+  }
+}
+process.on('unhandledRejection', (err) => logFatal('unhandledRejection', err));
+process.on('uncaughtException', (err) => logFatal('uncaughtException', err));
 
 // Players are discovered from the Ladder crawl itself, so there's no config
 // seeding here anymore; config/players.json is only an optional allowlist.

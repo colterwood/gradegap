@@ -156,10 +156,11 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
           grade: watch.grade,
         };
     const queries = buildQueries(target);
-    const label = watch.description
-      ? watch.description
-      : `${target.year ?? ''} ${target.playerName}`.trim();
-    currentLabel = `${source.name} — ${label} ${target.company} ${target.grade}`.trim();
+    // Show the FULL card name ("1997 Metal Universe Michael Jordan Titanium
+    // #1"), not year+player — the compressed form looked like a watch that
+    // didn't exist ("1997 Michael Jordan" matches four different watches).
+    const label = watch.card_name ?? watch.description ?? `${target.year ?? ''} ${target.playerName}`.trim();
+    currentLabel = `${source.name} — ${label} · ${target.company} ${target.grade}`.trim();
 
     // Hard-capped: a wedged site fails this item, never the whole run.
     let raw = await withTimeout(source.search({ text: queries.tight }), 90_000, `${source.name} search`);
