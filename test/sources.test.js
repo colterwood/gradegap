@@ -781,3 +781,43 @@ test('heritage: searches the URL Heritage actually serves, not the redirecting o
   assert.ok(!url.includes('search-results.zx'), 'must not use the redirecting path');
   assert.ok(!url.includes('Ntt='), 'must not use the old Ntt parameter');
 });
+
+test('toIsoDate: epoch seconds, epoch ms, ISO strings, and the toNumber trap', async () => {
+  const { toIsoDate, toNumber } = await import('../src/marketplace/sources/util.js');
+  // The trap: toNumber mangles an ISO string into a small number, so an
+  // epoch-only converter silently returned null for a valid date.
+  assert.equal(toNumber('2026-07-31T02:00:00Z'), 2026);
+  assert.equal(toIsoDate('2026-07-31T02:00:00Z'), '2026-07-31T02:00:00.000Z');
+
+  assert.equal(toIsoDate(1785722400), new Date(1785722400 * 1000).toISOString()); // seconds
+  assert.equal(toIsoDate(1785722400000), new Date(1785722400000).toISOString()); // ms
+  assert.equal(toIsoDate('1785722400'), new Date(1785722400 * 1000).toISOString()); // epoch as string
+  assert.equal(toIsoDate(null), null);
+  assert.equal(toIsoDate(''), null);
+  assert.equal(toIsoDate('not a date'), null);
+  assert.equal(toIsoDate(2026), null); // too small to be an epoch
+  assert.equal(toIsoDate(NaN), null);
+});
+
+test('goldin: ISO end_timestamp survives (every auction had a null end date)', async () => {
+  const { parseGoldinLots } = await import('../src/marketplace/sources/goldin.js');
+  // Field shape exactly as the live lots_v2 payload returns it.
+  const out = parseGoldinLots({
+    searchalgolia: { lots: [{
+      lot_id: '202607-2113-4455-169a6056',
+      title: '1992-93 Topps Stadium Club Beam Team #1 Michael Jordan - BGS 9',
+      meta_slug: '1992-93-topps-stadium-club-beam-team-1-michael-jordan',
+      current_price: 900,
+      start_timestamp: '2026-07-21T21:00:00Z',
+      end_timestamp: '2026-07-31T02:00:00Z',
+      auction_type: 'Weekly',
+    }] },
+  }, null, 'auction');
+  assert.equal(out.length, 1);
+  assert.equal(out[0].endsAt, '2026-07-31T02:00:00.000Z');
+  // An epoch-shaped payload must still work, in case Goldin switches back.
+  const epoch = parseGoldinLots(
+    { searchalgolia: { lots: [{ lot_id: '1', title: 'x', end_timestamp: 1785722400 }] } }, null, 'auction'
+  );
+  assert.equal(epoch[0].endsAt, new Date(1785722400 * 1000).toISOString());
+});

@@ -48,6 +48,30 @@ export async function fetchHtml(url, opts = {}) {
   return res.text();
 }
 
+// Normalize any end-time shape a marketplace hands us to ISO. Sites are
+// inconsistent and CHANGE: Goldin's end_timestamp is an ISO string while
+// Fanatics' auctionEndDatetime is epoch seconds, and the same field can
+// switch shape on a redeploy.
+//
+// The trap this exists to close: toNumber("2026-07-31T02:00:00Z") returns
+// 2026 (parseFloat stops at the first dash), not null — so an epoch-only
+// converter silently produced null for a perfectly good ISO date, and
+// Goldin auctions were stored with no end time at all.
+export const toIsoDate = (v) => {
+  if (v == null) return null;
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return null;
+    if (v > 1e12) return new Date(v).toISOString(); // ms
+    if (v > 1e9) return new Date(v * 1000).toISOString(); // seconds
+    return null; // too small to be a plausible epoch
+  }
+  const s = String(v).trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return toIsoDate(Number(s)); // epoch as a string
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+};
+
 export const centsToDollars = (c) => (c == null ? null : Math.round(Number(c)) / 100);
 
 export const toNumber = (v) => {

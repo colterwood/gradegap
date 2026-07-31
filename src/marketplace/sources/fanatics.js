@@ -7,7 +7,7 @@
 // old GraphQL search chain remains as a fallback for other deployments.
 // Verify locally with `npm run test-source fanatics "jordan psa 10"`.
 
-import { fetchWithTimeout, centsToDollars, toNumber, saveDebug, debugLog } from './util.js';
+import { fetchWithTimeout, centsToDollars, toNumber, toIsoDate, saveDebug, debugLog } from './util.js';
 
 const GRAPHQL_URL = 'https://app.fanaticscollect.com/graphql';
 const SITE = 'https://www.fanaticscollect.com';
@@ -80,13 +80,10 @@ export function buildFanaticsUrl(node) {
   return `${SITE}/search?query=${encodeURIComponent(String(title).slice(0, 120))}`;
 }
 
-const epochToIso = (v) => {
-  const n = toNumber(v);
-  if (n == null) return typeof v === 'string' ? v : null;
-  if (n > 1e12) return new Date(n).toISOString();
-  if (n > 1e9) return new Date(n * 1000).toISOString();
-  return null;
-};
+// Shared normalizer: this adapter's field is epoch seconds today, but the
+// same "looks numeric, is actually ISO" trap that emptied every Goldin end
+// time applies here the moment Fanatics changes shape.
+const epochToIso = toIsoDate;
 
 // Pure, fixture-testable: one Algolia hit → normalized listing (tolerant of
 // field-name drift: ids, money-in-cents vs dollars, epoch vs ISO end times).

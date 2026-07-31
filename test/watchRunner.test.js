@@ -143,6 +143,28 @@ test('reminder window and staleness queries behave', async () => {
   assert.equal(q.getListingByKey.get('mockmarket', 'mkt-fixed-cad'), undefined);
 });
 
+test('an auction with no end date ages out via misses instead of living forever', async () => {
+  // deleteEndedAuctions needs an ends_at, so an auction whose end time a
+  // source never reported (every Goldin auction, before the ISO fix) could
+  // never be removed by any path. Those must accrue misses like fixed ones.
+  const { db, q, runner, watch } = await freshWatched();
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  const auction = q.getListingByKey.get('mockmarket', 'mkt-auction-1');
+  db.prepare(`UPDATE listings SET ends_at = NULL WHERE id = ?`).run(auction.id);
+
+  // A check that doesn't see it bumps the counter (last_seen_at predates it).
+  q.bumpListingMisses.run({ watchId: watch.id, source: 'mockmarket', runStartedAt: '2099-01-01 00:00:00' });
+  assert.equal(q.getListingById.get(auction.id).misses, 1);
+
+  // An auction that DOES have an end date is left alone — it gets deleted
+  // when that date passes, so miss-counting it would remove it early.
+  db.prepare(`UPDATE listings SET ends_at = '2099-01-01 00:00:00', misses = 0 WHERE id = ?`).run(auction.id);
+  q.bumpListingMisses.run({ watchId: watch.id, source: 'mockmarket', runStartedAt: '2099-01-01 00:00:00' });
+  assert.equal(q.getListingById.get(auction.id).misses, 0);
+});
+
 test('follow flag: round-trip, Following filter, unfollow resets the reminder flag', async () => {
   const { q, runner, watch } = await freshWatched();
   await runner.start({});

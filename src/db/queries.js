@@ -387,12 +387,17 @@ export function makeQueries(db) {
       WHERE listing_type = 'auction' AND ends_at IS NOT NULL AND ends_at < datetime('now')
         AND status IN ('new','notified')
     `),
-    // Staleness for fixed-price listings (they never "end" on their own): a
-    // successful (watch, source) check that didn't see a listing bumps its
-    // miss counter; 3 consecutive misses = confidently sold/delisted, deleted.
+    // Staleness for listings that can't age out any other way: fixed-price
+    // ones (they never "end"), and auctions whose end date we never captured
+    // — deleteEndedAuctions can't touch those (it needs ends_at), so without
+    // this they would live in the table forever. An auction WITH an end date
+    // is left alone; it gets deleted the moment that date passes.
+    // A successful (watch, source) check that didn't see the listing bumps
+    // its miss counter; 3 consecutive misses = confidently gone.
     bumpListingMisses: db.prepare(`
       UPDATE listings SET misses = misses + 1
-      WHERE watch_id = @watchId AND source = @source AND listing_type = 'fixed'
+      WHERE watch_id = @watchId AND source = @source
+        AND (listing_type = 'fixed' OR ends_at IS NULL)
         AND status IN ('new','notified') AND last_seen_at < @runStartedAt
     `),
     deleteStaleListings: db.prepare(`

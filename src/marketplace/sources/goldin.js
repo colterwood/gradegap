@@ -7,7 +7,7 @@
 // Verify locally with `npm run test-source goldin "jordan psa 10"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { toNumber, saveDebug, debugLog, gotoStable, parkPage } from './util.js';
+import { toNumber, toIsoDate, saveDebug, debugLog, gotoStable, parkPage } from './util.js';
 
 const SITE = 'https://goldin.co';
 
@@ -21,15 +21,6 @@ export function extractGoldinConfig(bundleJs) {
     cloudFront: grab(/cloudFrontURL\s*:\s*["'](https:[^"']+)["']/),
   };
 }
-
-// Epoch (seconds or ms) → ISO; anything else → null.
-const epochToIso = (v) => {
-  const n = toNumber(v);
-  if (n == null) return null;
-  if (n > 1e12) return new Date(n).toISOString();
-  if (n > 1e9) return new Date(n * 1000).toISOString();
-  return null;
-};
 
 // Pure, fixture-testable: a lots response body → normalized raw listings.
 export function parseGoldinLots(body, cloudFront, listingType = 'auction') {
@@ -64,8 +55,15 @@ export function parseGoldinLots(body, cloudFront, listingType = 'auction') {
       price: toNumber(lot.current_price ?? lot.min_bid_price ?? lot.price ?? lot.buy_now_price),
       currency: 'USD',
       listingType,
-      // end_timestamp (epoch) is what live lots actually carry.
-      endsAt: epochToIso(lot.end_timestamp) ?? lot.end_time ?? lot.ends_at ?? lot.auction_end_time ?? null,
+      // Live lots carry end_timestamp as an ISO string ("2026-07-31T02:00:00Z"),
+      // NOT an epoch — assuming epoch discarded every end time (all Goldin
+      // auctions stored with ends_at NULL). toIsoDate takes either shape.
+      endsAt:
+        toIsoDate(lot.end_timestamp) ??
+        toIsoDate(lot.end_time) ??
+        toIsoDate(lot.ends_at) ??
+        toIsoDate(lot.auction_end_time) ??
+        null,
       imageUrl,
       seller: null,
     });
