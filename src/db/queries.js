@@ -280,9 +280,21 @@ export function makeQueries(db) {
     deleteWatchDismissed: db.prepare(`DELETE FROM dismissed_listings WHERE watch_id = ?`),
     insertListing: db.prepare(`
       INSERT INTO listings (watch_id, source, listing_id, canonical_key, title, url, price, currency,
-                            price_usd, listing_type, ends_at, image_url, seller, match_score, match_debug)
+                            price_usd, listing_type, ends_at, image_url, seller, match_score,
+                            match_specificity, match_debug)
       VALUES (@watchId, @source, @listingId, @canonicalKey, @title, @url, @price, @currency,
-              @priceUsd, @listingType, @endsAt, @imageUrl, @seller, @matchScore, @matchDebug)
+              @priceUsd, @listingType, @endsAt, @imageUrl, @seller, @matchScore,
+              @matchSpecificity, @matchDebug)
+    `),
+    // A listing can match SEVERAL watched cards; only one row exists per
+    // (source, listing_id). Hand it to the better-matching watch when one
+    // turns up, instead of leaving it with whichever watch happened to
+    // search first. followed/status/reminder flags stay put — they belong
+    // to the user, not to the owning watch.
+    reassignListing: db.prepare(`
+      UPDATE listings SET watch_id = @watchId, match_score = @matchScore,
+        match_specificity = @matchSpecificity, match_debug = @matchDebug
+      WHERE id = @id
     `),
     // A re-sighting refreshes the live fields and resets the staleness
     // counter. url is refreshed too, so rows stored before an adapter's

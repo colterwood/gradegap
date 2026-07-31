@@ -49,6 +49,21 @@ export function nextFireDelayMs(times, tz, now = new Date()) {
 // Did a re-sighted listing's price actually go DOWN? Native currency only —
 // comparing across a currency change (or through the USD conversion) would
 // let FX drift fake a "drop" the seller never made. Sub-cent noise ignored.
+// One listing can satisfy several watched cards ("Beam Team Members Only"
+// titles match a plain "Members Only" watch too), but the listings table
+// holds ONE row per (source, listing_id) — so exactly one watch owns it.
+// Ownership goes to the better match, not to whichever watch searched
+// first: higher score wins; on a tie, the more SPECIFIC watch wins (the one
+// whose identity explains more of the title). Ties beyond that keep the
+// incumbent, so ownership can't oscillate between equal candidates.
+export function isBetterOwner(candidate, existing) {
+  const eps = 1e-9;
+  const exScore = existing.match_score ?? 0;
+  if (candidate.score > exScore + eps) return true;
+  if (candidate.score < exScore - eps) return false;
+  return (candidate.specificity ?? 0) > (existing.match_specificity ?? 0);
+}
+
 export function priceDropped(existing, raw) {
   const oldPrice = existing?.price;
   const newPrice = raw?.price;
@@ -128,6 +143,16 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
             currency: existing.currency ?? 'USD',
           });
         }
+        // Contested listing: hand it to this watch if it matches better.
+        if (existing.watch_id !== watch.id && isBetterOwner(score, existing)) {
+          q.reassignListing.run({
+            id: existing.id,
+            watchId: watch.id,
+            matchScore: score.score,
+            matchSpecificity: score.specificity ?? 0,
+            matchDebug: JSON.stringify(score.debug),
+          });
+        }
         q.refreshListing.run({
           id: existing.id,
           title: raw.title,
@@ -168,6 +193,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
           imageUrl: raw.imageUrl ?? null,
           seller: raw.seller ?? null,
           matchScore: score.score,
+          matchSpecificity: score.specificity ?? 0,
           matchDebug: JSON.stringify(score.debug),
         });
         newCount += 1;

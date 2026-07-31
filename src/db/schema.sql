@@ -114,6 +114,10 @@ CREATE TABLE IF NOT EXISTS listings (
   image_url      TEXT,
   seller         TEXT,
   match_score    REAL,
+  -- How many of the owning watch's identity tokens appear in the title.
+  -- Breaks ties when two watches both score 1.0 on one listing: the more
+  -- specific watch (whose identity explains more of the title) owns it.
+  match_specificity INTEGER,
   match_debug    TEXT,
   status         TEXT NOT NULL DEFAULT 'new'
                  CHECK (status IN ('new','notified')),

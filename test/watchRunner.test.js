@@ -12,7 +12,7 @@ process.env.EMAIL_TO = '';
 const { openDb } = await import('../src/db/db.js');
 const { makeQueries } = await import('../src/db/queries.js');
 const { createSyncManager } = await import('../src/sync/syncRunner.js');
-const { createWatchRunner, priceDropped, orderSources, nextFireDelayMs } = await import('../src/marketplace/watchRunner.js');
+const { createWatchRunner, priceDropped, orderSources, nextFireDelayMs, isBetterOwner } = await import('../src/marketplace/watchRunner.js');
 const { sendEmail, emailConfigured } = await import('../src/marketplace/notify.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -264,6 +264,64 @@ test('a custom search term replaces the generated queries verbatim', async () =>
   assert.ok(
     q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null }).length >= rows.length
   );
+});
+
+test('isBetterOwner: score first, specificity breaks ties, incumbent keeps true ties', () => {
+  const owned = (score, specificity) => ({ match_score: score, match_specificity: specificity });
+  // Higher score always wins.
+  assert.equal(isBetterOwner({ score: 0.9, specificity: 1 }, owned(0.8, 9)), true);
+  assert.equal(isBetterOwner({ score: 0.7, specificity: 9 }, owned(0.8, 1)), false);
+  // Equal score -> the more specific watch takes it (the Beam Team case).
+  assert.equal(isBetterOwner({ score: 1, specificity: 8 }, owned(1, 6)), true);
+  assert.equal(isBetterOwner({ score: 1, specificity: 6 }, owned(1, 8)), false);
+  // Dead tie -> incumbent stays, so ownership cannot oscillate run to run.
+  assert.equal(isBetterOwner({ score: 1, specificity: 6 }, owned(1, 6)), false);
+  // Legacy rows predate match_specificity (NULL) -> treated as 0.
+  assert.equal(isBetterOwner({ score: 1, specificity: 1 }, { match_score: 1 }), true);
+});
+
+test('a contested listing moves to the better-matching watch', async () => {
+  const { db, q, runner, card } = await freshWatched();
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  const listing = q.getListingByKey.get('mockmarket', 'mkt-auction-1');
+  assert.ok(listing, 'the auction listing was stored');
+  const rightfulOwner = listing.watch_id;
+
+  // Hand it to a different watch with a deliberately poor match, as a
+  // first-searched-but-worse watch would have done.
+  q.insertWatch.run({ cardId: card.id, gradingCompany: 'BGS', grade: '9', maxPrice: null });
+  const other = q.getWatchByKey.get(card.id, 'BGS', '9');
+  db.prepare('UPDATE listings SET watch_id = ?, match_score = 0.3, match_specificity = 1 WHERE id = ?')
+    .run(other.id, listing.id);
+
+  // Next check: the genuinely-better watch reclaims it, in place.
+  await runner.start({});
+  await waitUntilDone(runner);
+  const after = q.getListingById.get(listing.id);
+  assert.equal(after.watch_id, rightfulOwner, 'reassigned to the better match');
+  assert.ok(after.match_score > 0.3);
+  assert.equal(q.getListingByKey.get('mockmarket', 'mkt-auction-1').id, listing.id, 'same row, not a duplicate');
+});
+
+test('reassignment preserves the user-owned flags', async () => {
+  const { db, q, runner, card } = await freshWatched();
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  const listing = q.getListingByKey.get('mockmarket', 'mkt-auction-1');
+  q.insertWatch.run({ cardId: card.id, gradingCompany: 'BGS', grade: '9', maxPrice: null });
+  const other = q.getWatchByKey.get(card.id, 'BGS', '9');
+  // Followed by the user, and parked on the wrong watch.
+  db.prepare('UPDATE listings SET watch_id = ?, match_score = 0.3, match_specificity = 1, followed = 1 WHERE id = ?')
+    .run(other.id, listing.id);
+
+  await runner.start({});
+  await waitUntilDone(runner);
+  const after = q.getListingById.get(listing.id);
+  assert.notEqual(after.watch_id, other.id, 'ownership moved');
+  assert.equal(after.followed, 1, 'still followed — the flag is the user\'s, not the watch\'s');
 });
 
 test('orderSources: priority names first, stragglers keep registry order', () => {

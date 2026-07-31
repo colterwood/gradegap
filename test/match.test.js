@@ -226,6 +226,70 @@ test('a base watch does not score the Sticker parallel at 100%', () => {
   assert.ok(exact.score >= 0.9, `score ${exact.score}`);
 });
 
+test('nicknames in parentheses are NOT accepted as a surname', () => {
+  // Live catalog is full of mid-name nicknames — "Floyd (Babe) Herman",
+  // "Charles (Red) Dooin". Treating the nickname as an alternate surname
+  // let a Babe HERMAN watch match a Babe RUTH listing.
+  const herman = {
+    playerName: 'Floyd (Babe) Herman', year: 1933, setName: 'Goudey',
+    cardNumber: null, parallel: null, company: 'PSA', grade: '3',
+  };
+  assert.equal(scoreListing(herman, '1933 Goudey Babe Ruth #144 PSA 3').ok, false);
+  assert.equal(scoreListing(herman, '1933 Goudey Babe Herman #5 PSA 3').ok, true);
+
+  // Multi-token aliases ARE alternate full names and still count.
+  assert.equal(scoreListing(kareem, '1986 Fleer Lew Alcindor #1 BGS 9').ok, true);
+  // "(Shoeless) Joe Jackson" must still require the real surname.
+  const jackson = {
+    playerName: '(Shoeless) Joe Jackson', year: 1915, setName: 'Cracker Jack',
+    cardNumber: null, parallel: null, company: 'PSA', grade: '2',
+  };
+  assert.equal(scoreListing(jackson, '1915 Cracker Jack Shoeless Ty Cobb PSA 2').ok, false);
+  assert.equal(scoreListing(jackson, '1915 Cracker Jack Joe Jackson PSA 2').ok, true);
+});
+
+test('variant exemption is plural-insensitive (a Stickers watch fits a Sticker title)', () => {
+  const stickersWatch = {
+    playerName: 'Lionel Messi', year: 2004, setName: 'Panini Stickers',
+    cardNumber: '64', parallel: null, company: 'PSA', grade: '9',
+  };
+  const r = scoreListing(stickersWatch, '2004 Panini Sticker #64 Lionel Messi Rookie PSA 9');
+  assert.equal(r.ok, true);
+  assert.ok(!r.debug.penalties.some((p) => p.startsWith('variant:sticker')), 'no false sticker penalty');
+  // Was 0.4 with the exact-token exemption — hidden by the default
+  // "Hide low-confidence (<50%)" filter. Now clears both that cutoff and
+  // the 70% low-confidence badge. (It isn't 1.0 because the plural set
+  // token genuinely doesn't appear in the title — that's honest fuzz.)
+  assert.ok(r.score > 0.7, `score ${r.score}`);
+
+  // Same tolerance the other way round: singular watch, plural title.
+  const singular = { ...stickersWatch, setName: 'Panini Sticker' };
+  const r2 = scoreListing(singular, '2004 Panini Stickers #64 Lionel Messi Rookie PSA 9');
+  assert.ok(!r2.debug.penalties.some((p) => p.startsWith('variant:sticker')));
+});
+
+test('specificity: the subset watch and the superset watch both score, the specific one is more specific', () => {
+  // The live mis-assignment: a "Beam Team Members Only" listing was owned
+  // by the plain "Members Only" watch, which scores 1.0 because ALL its
+  // tokens appear in the title. Specificity is what separates them.
+  const title = '1992-93 Stadium Club Beam Team Members Only Michael Jordan #1 BGS 9';
+  const base = {
+    playerName: 'Michael Jordan', year: 1992, setName: 'Stadium Club',
+    cardNumber: '1', parallel: 'Members Only', company: 'BGS', grade: '9',
+  };
+  const beamTeam = { ...base, parallel: 'Beam Team Members Only' };
+
+  const b = scoreListing(base, title);
+  const bt = scoreListing(beamTeam, title);
+  assert.equal(b.ok, true);
+  assert.equal(bt.ok, true);
+  // Both are perfect on score — which is exactly why score alone can't decide.
+  assert.equal(b.score, 1);
+  assert.equal(bt.score, 1);
+  // The Beam Team watch explains strictly more of the title.
+  assert.ok(bt.specificity > b.specificity, `${bt.specificity} vs ${b.specificity}`);
+});
+
 // --- manual watches (hand-added on the Watched tab) ------------------------
 
 const manual = (over = {}) => ({

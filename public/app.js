@@ -569,6 +569,21 @@ function fmtTimeLeft(endsAt) {
   return `${Math.floor(hours / 24)}d ${hours % 24}h left`;
 }
 
+// When a listing row was added, in Regina local time (the machine's zone;
+// no DST there, but Intl handles that either way). found_at is SQLite UTC.
+function fmtAdded(sqlTs) {
+  const d = parseSqlDate(sqlTs);
+  if (!d || isNaN(d.getTime())) return '—';
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Regina',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(d).map((x) => [x.type, x.value])
+  );
+  return `${p.year}-${p.month}-${p.day} ${p.hour === '24' ? '00' : p.hour}:${p.minute}`;
+}
+
 // None grader + Raw grade are one state: an ungraded card.
 const slabLabel = (w) =>
   w.grading_company === 'None' || w.grade === 'Raw' ? 'Ungraded' : `${w.grading_company} ${w.grade}`;
@@ -700,6 +715,7 @@ function renderMatches(viewKey) {
       <td><span class="source-badge">${esc(m.source)}</span></td>
       <td class="listing-title">${title}${m.seller ? `<div class="seller">${esc(m.seller)}</div>` : ''}</td>
       <td class="watch-ref">${esc(watchLabel(m))}</td>
+      <td class="date">${fmtAdded(m.found_at)}</td>
       <td class="num">${fmtMoney(m.price_usd ?? m.price)}${m.currency && m.currency !== 'USD' ? `<div class="native-price">${esc(String(m.price))} ${esc(m.currency)}</div>` : ''}</td>
       <td class="num cl-value">${fmtMoney(m.cl_value)}</td>
       <td class="num cl-value">${fmtMoney(m.psa_value)}</td>

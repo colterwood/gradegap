@@ -177,8 +177,15 @@ const VARIANT_WORDS = [
   'sticker', 'stickers',
 ];
 
+// Plural-insensitive exemption: a "Panini Stickers" watch must not be
+// penalized for a "... Sticker ..." title (and vice versa). Live data has
+// BOTH spellings as real set/parallel names, so exact-token matching
+// silently pushed correct cards under the 50% visibility cutoff.
+const variantExempt = (targetTokens, w) =>
+  targetTokens.has(w) || targetTokens.has(`${w}s`) || (w.endsWith('s') && targetTokens.has(w.slice(0, -1)));
+
 const variantWords = (titleTokens, targetTokens) =>
-  VARIANT_WORDS.filter((w) => titleTokens.has(w) && !targetTokens.has(w));
+  VARIANT_WORDS.filter((w) => titleTokens.has(w) && !variantExempt(targetTokens, w));
 
 // --- scoring ---------------------------------------------------------------
 
@@ -218,7 +225,12 @@ export function scoreListing(target, title) {
       score -= 0.35;
       penalties.push(`variant:${w}`);
     }
-    return { ok: true, score: Math.max(0, Math.min(1, score)), debug: { matched, missing, penalties } };
+    return {
+      ok: true,
+      score: Math.max(0, Math.min(1, score)),
+      specificity: want.length,
+      debug: { matched, missing, penalties },
+    };
   }
 
   // -- catalog watch hard requirements
@@ -231,7 +243,19 @@ export function scoreListing(target, title) {
   const lastName = nameTokens[nameTokens.length - 1];
   if (lastName) {
     // The title may use either identity: "Abdul-Jabbar" or "Lew Alcindor".
-    const surnames = [lastName, ...aliases.map((a) => tokenize(a).pop()).filter(Boolean)];
+    // ONLY multi-token aliases count as an alternate full name. Most
+    // parentheticals in the Ladder catalog are mid-name NICKNAMES —
+    // "Floyd (Babe) Herman", "Charles (Red) Dooin", "Frank (Home Run)
+    // Baker" — and accepting "babe"/"red"/"run" as a surname let listings
+    // for entirely different players clear the hard gate (a Babe Herman
+    // watch matched Babe RUTH). "(Shoeless) Joe Jackson" still requires
+    // "jackson"; "Kareem Abdul-Jabbar (Lew Alcindor)" still accepts
+    // "alcindor".
+    const aliasSurnames = aliases
+      .map((a) => tokenize(a))
+      .filter((t) => t.length >= 2)
+      .map((t) => t[t.length - 1]);
+    const surnames = [lastName, ...aliasSurnames];
     const hit = surnames.find((s) => tokens.has(s));
     if (hit) matched.push(`player:${hit}`);
     else missing.push(`player:${surnames.join('|')}`);
@@ -246,7 +270,7 @@ export function scoreListing(target, title) {
     missing.push(`set:${setTokens.join(' ')}`);
   }
   if (missing.length > 0) {
-    return { ok: false, score: 0, debug: { matched, missing, penalties } };
+    return { ok: false, score: 0, specificity: 0, debug: { matched, missing, penalties } };
   }
 
   // -- fuzzy score over whatever identity fields the card actually has
@@ -303,6 +327,13 @@ export function scoreListing(target, title) {
     penalties.push(`variant:${w}`);
   }
 
+  // How much of this title the watch's identity actually accounts for. Two
+  // watches can both score 1.0 on the same listing when one's identity is a
+  // strict SUBSET of the other's ("Members Only" vs "Beam Team Members
+  // Only" — every token of the former appears in a Beam Team title). The
+  // more specific watch explains more of the title, so it owns the listing.
+  const specificity = [...identityTokens].filter((t) => tokens.has(t)).length;
+
   score = Math.max(0, Math.min(1, score));
-  return { ok: true, score, debug: { matched, missing, penalties } };
+  return { ok: true, score, specificity, debug: { matched, missing, penalties } };
 }
