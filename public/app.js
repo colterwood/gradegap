@@ -637,14 +637,18 @@ function renderMatches(viewKey) {
   const all = view.rows;
   for (const m of all) m._deal = dealDot(m);
 
-  // "Hide low-confidence" hides sub-50% scores from view (they stay in the
-  // DB and reappear if unchecked) — Listings only: the Following tab is a
-  // hand-curated list, nothing there should be hidden. Ended/dismissed
+  // Listings-only view filters (the Following tab is a hand-curated list,
+  // nothing there should be hidden): "Hide low-confidence" drops sub-50%
+  // scores, "Hide following" drops rows already tagged onto the Following
+  // tab — seeing them in both places is redundant. Both are view-only; the
+  // rows stay in the DB and reappear when unchecked. Ended/dismissed
   // listings never reach here at all — they're deleted server-side the
   // moment they're confirmed gone.
-  let matches = viewKey === 'listings' && $('hide-low').checked
-    ? all.filter((m) => m.match_score == null || m.match_score >= 0.5)
-    : [...all];
+  let matches = [...all];
+  if (viewKey === 'listings') {
+    if ($('hide-low').checked) matches = matches.filter((m) => m.match_score == null || m.match_score >= 0.5);
+    if ($('hide-following').checked) matches = matches.filter((m) => !m.followed);
+  }
 
   const terms = view.search.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length > 0) {
@@ -713,8 +717,9 @@ function renderMatches(viewKey) {
   }
   const hidden = all.length - matches.length;
   const noun = viewKey === 'following' ? 'followed listing' : 'live listing';
+  const reasons = viewKey === 'listings' ? 'followed, low-confidence, or search' : 'search';
   $(view.summaryId).textContent = `${matches.length} ${noun}${matches.length === 1 ? '' : 's'}` +
-    (hidden > 0 ? ` · ${hidden} hidden (low-confidence or search)` : '');
+    (hidden > 0 ? ` · ${hidden} hidden (${reasons})` : '');
 }
 
 async function loadWatchedView() {
@@ -872,6 +877,9 @@ document.querySelector('#matches-table tbody').addEventListener('change', async 
     });
     const row = listingViews.listings.rows.find((m) => m.id === Number(cb.dataset.id));
     if (row) row.followed = cb.checked ? 1 : 0;
+    // With "Hide following" on, a just-followed row leaves the table right
+    // away — it now lives on the Following tab.
+    if ($('hide-following').checked) renderMatches('listings');
   } catch (err) {
     setError(err.message);
     cb.checked = !cb.checked;
@@ -896,6 +904,7 @@ document.querySelector('#following-table tbody').addEventListener('click', async
 });
 
 $('hide-low').addEventListener('change', () => renderMatches('listings'));
+$('hide-following').addEventListener('change', () => renderMatches('listings'));
 
 // Per-table search boxes, same feel as the disparity tab's.
 for (const [viewKey, inputId] of [['listings', 'listing-search'], ['following', 'following-search']]) {
