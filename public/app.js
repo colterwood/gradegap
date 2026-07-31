@@ -650,6 +650,35 @@ function matchSortValue(m, col) {
 // One renderer for both listing tables. viewKey selects the per-view state
 // in listingViews; the two tables differ only in their first and last
 // columns (Listings: Follow checkbox + Dismiss; Following: Unfollow).
+// The Watched card cell. When a listing title could belong to more than one
+// watched card, offer them all in a dropdown (best match first) so a
+// mis-attributed row can be corrected — picking one PINS it, and "Auto"
+// hands it back to the scorer. A single candidate needs no dropdown.
+function watchCardCell(m) {
+  const cands = m.candidates ?? [];
+  const current = watchLabel(m);
+  if (cands.length < 2) {
+    return esc(current) + (m.watch_locked ? ' <span class="pin" title="Pinned by you">📌</span>' : '');
+  }
+  const opts = cands
+    .map(
+      (c) =>
+        `<option value="${c.watchId}" ${c.watchId === m.watch_id ? 'selected' : ''}>` +
+        `${esc(c.label)} — ${Math.round(c.score * 100)}%</option>`
+    )
+    .join('');
+  // The current owner may not be among the candidates (a pinned pick that
+  // no longer matches) — keep it selectable so the cell never lies.
+  const orphan = cands.some((c) => c.watchId === m.watch_id)
+    ? ''
+    : `<option value="${m.watch_id}" selected>${esc(current)} — pinned</option>`;
+  return (
+    `<select class="watch-pick" data-id="${m.id}" title="${cands.length} watched cards match this listing — pick the right one">` +
+    `${orphan}${opts}<option value="auto">↺ Auto (best match)</option></select>` +
+    (m.watch_locked ? ' <span class="pin" title="Pinned by you">📌</span>' : '')
+  );
+}
+
 function renderMatches(viewKey) {
   const view = listingViews[viewKey];
   const all = view.rows;
@@ -714,7 +743,7 @@ function renderMatches(viewKey) {
       <td class="dot-cell"><span class="dot dot-${m._deal.color}" title="${esc(m._deal.title)}"></span></td>
       <td><span class="source-badge">${esc(m.source)}</span></td>
       <td class="listing-title">${title}${m.seller ? `<div class="seller">${esc(m.seller)}</div>` : ''}</td>
-      <td class="watch-ref">${esc(watchLabel(m))}</td>
+      <td class="watch-ref">${watchCardCell(m)}</td>
       <td class="date">${fmtAdded(m.found_at)}</td>
       <td class="num">${fmtMoney(m.price_usd ?? m.price)}${m.currency && m.currency !== 'USD' ? `<div class="native-price">${esc(String(m.price))} ${esc(m.currency)}</div>` : ''}</td>
       <td class="num cl-value">${fmtMoney(m.cl_value)}</td>
@@ -891,6 +920,28 @@ document.querySelector('#matches-table tbody').addEventListener('click', async (
     setError(err.message);
   }
 });
+
+// Watched-card dropdown on either listing table: re-point a mis-attributed
+// listing at the right card (or back to automatic). CL Value / PSA / the
+// deal dot all come from the owning watch, so the view is reloaded after.
+for (const [viewKey, tableId] of [['listings', 'matches-table'], ['following', 'following-table']]) {
+  document.querySelector(`#${tableId} tbody`).addEventListener('change', async (e) => {
+    const sel = e.target.closest('select.watch-pick');
+    if (!sel) return;
+    sel.disabled = true;
+    try {
+      await api(`/api/matches/${sel.dataset.id}/watch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ watchId: sel.value === 'auto' ? null : Number(sel.value) }),
+      });
+      await (viewKey === 'listings' ? loadListingsView() : loadFollowingView());
+    } catch (err) {
+      setError(err.message);
+      sel.disabled = false;
+    }
+  });
+}
 
 // Follow checkbox on a Listings row: tag/untag for the Following tab.
 document.querySelector('#matches-table tbody').addEventListener('change', async (e) => {

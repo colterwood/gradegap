@@ -6,7 +6,7 @@ import {
   MANUAL_GRADERS,
   MANUAL_GRADES,
 } from '../config.js';
-import { buildQueries } from '../marketplace/match.js';
+import { buildQueries, scoreListing } from '../marketplace/match.js';
 
 // The automatic search query for a watch row — same construction the
 // runner uses, so the Watched tab's Search-term placeholder shows exactly
@@ -30,6 +30,54 @@ function autoSearch(w) {
 // all SQL lives in queries.js, 409 means "already running".
 export function makeWatchRouter(db, q, watchRunner) {
   const router = Router();
+
+  // Scoring target for a watch row, matching what the runner builds so the
+  // UI's candidate list agrees with what a check would decide.
+  const siblingCache = new Map();
+  const siblingsFor = (cardId) => {
+    if (cardId == null) return [];
+    if (!siblingCache.has(cardId)) {
+      siblingCache.set(cardId, q.siblingParallels.all(cardId).map((r) => r.parallel));
+    }
+    return siblingCache.get(cardId);
+  };
+  const watchTarget = (w) =>
+    w.description && w.card_id == null
+      ? { description: w.description, company: w.grading_company, grade: w.grade }
+      : {
+          playerName: w.player_name ?? w.card_name,
+          year: w.year,
+          setName: w.set_name,
+          cardNumber: w.card_number,
+          parallel: w.parallel,
+          company: w.grading_company,
+          grade: w.grade,
+          siblingParallels: siblingsFor(w.card_id),
+        };
+
+  // Which watched cards could this listing title belong to, best first.
+  // Powers the Watched-card dropdown so a mis-attributed row can be moved
+  // to the right card by hand.
+  function candidatesFor(title, targets) {
+    const out = [];
+    for (const { watch, target, label } of targets) {
+      const s = scoreListing(target, title);
+      if (s.ok) out.push({ watchId: watch.id, label, score: s.score, specificity: s.specificity });
+    }
+    out.sort((a, b) => b.score - a.score || b.specificity - a.specificity);
+    return out;
+  }
+
+  const slabOf = (w) =>
+    w.grading_company === 'None' || w.grade === 'Raw' ? 'Ungraded' : `${w.grading_company} ${w.grade}`;
+
+  function watchTargets() {
+    return q.listWatchTargets.all().map((w) => ({
+      watch: w,
+      target: watchTarget(w),
+      label: `${w.card_name} · ${slabOf(w)}`,
+    }));
+  }
 
   const VALID_COMPANIES = [BASELINE_COMPANY, ...COMPARE_GRADERS];
   const toPrice = (v) => (v == null || v === '' ? null : Math.max(0, parseFloat(v) || 0) || null);
@@ -119,7 +167,43 @@ export function makeWatchRouter(db, q, watchRunner) {
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
     // followed=1 -> Following tab; followed=0 -> unfollowed only; absent -> all.
     const followed = req.query.followed === '1' ? 1 : req.query.followed === '0' ? 0 : null;
-    res.json(q.listMatches.all({ watchId, statuses: `|${statuses.join('|')}|`, limit, followed }));
+    const rows = q.listMatches.all({ watchId, statuses: `|${statuses.join('|')}|`, limit, followed });
+    // Attach the other watched cards each listing could belong to, so the
+    // UI can offer them in a dropdown. Targets are built once per request.
+    const targets = watchTargets();
+    res.json(rows.map((r) => ({ ...r, candidates: candidatesFor(r.title, targets) })));
+  });
+
+  // Move a listing to a different watched card by hand. watchId null (or
+  // 'auto') releases the pin and lets scoring own it again.
+  router.post('/matches/:id/watch', (req, res) => {
+    const id = Number(req.params.id);
+    const listing = q.getListingById.get(id);
+    if (!listing) return res.status(404).json({ ok: false, error: 'no such listing' });
+    const raw = req.body?.watchId;
+
+    if (raw == null || raw === 'auto') {
+      // Release: re-score against every candidate and take the best, exactly
+      // as a check would, so the row doesn't sit on a stale manual choice.
+      const best = candidatesFor(listing.title, watchTargets())[0];
+      if (!best) return res.status(400).json({ ok: false, error: 'no watched card matches this listing' });
+      q.setListingWatch.run({
+        id, watchId: best.watchId, matchScore: best.score, matchSpecificity: best.specificity, locked: 0,
+      });
+      return res.json({ ok: true, watchId: best.watchId, locked: false });
+    }
+
+    const watchId = Number(raw);
+    const watch = q.getWatch.get(watchId);
+    if (!watch) return res.status(400).json({ ok: false, error: 'no such watch' });
+    // Score the chosen pairing so CL/PSA/Match stay honest; a hand-picked
+    // card that doesn't match scores 0, which is information, not an error.
+    const chosen = watchTargets().find((t) => t.watch.id === watchId);
+    const s = chosen ? scoreListing(chosen.target, listing.title) : { score: 0, specificity: 0 };
+    q.setListingWatch.run({
+      id, watchId, matchScore: s.score, matchSpecificity: s.specificity ?? 0, locked: 1,
+    });
+    res.json({ ok: true, watchId, locked: true });
   });
 
   // Tag/untag a listing for the Following tab.

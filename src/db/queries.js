@@ -183,6 +183,24 @@ export function makeQueries(db) {
     getCardByClId,
     resultsQuery,
 
+    // Parallels of OTHER catalog cards sharing a card's identity
+    // (player+year+set+number). Drives the match layer's parallel gate:
+    // with siblings the parallel is the only discriminator and must appear;
+    // without them it's a decorative label sellers omit. A NULL row means a
+    // plain base-card sibling exists, which still makes the parallel
+    // discriminating — so nulls are kept.
+    siblingParallels: db.prepare(`
+      SELECT DISTINCT c2.parallel AS parallel
+      FROM cards c1
+      JOIN cards c2
+        ON c2.id != c1.id
+       AND IFNULL(c2.player_id,-1) = IFNULL(c1.player_id,-1)
+       AND IFNULL(c2.year,-1) = IFNULL(c1.year,-1)
+       AND IFNULL(c2.set_name,'') = IFNULL(c1.set_name,'')
+       AND IFNULL(c2.card_number,'') = IFNULL(c1.card_number,'')
+      WHERE c1.id = ?
+    `),
+
     listPlayers: db.prepare(`SELECT * FROM players WHERE search_term IS NOT NULL OR id IN (SELECT DISTINCT player_id FROM cards) ORDER BY name`),
     getPlayerByName: db.prepare(`SELECT * FROM players WHERE name = ?`),
 
@@ -295,6 +313,25 @@ export function makeQueries(db) {
       UPDATE listings SET watch_id = @watchId, match_score = @matchScore,
         match_specificity = @matchSpecificity, match_debug = @matchDebug
       WHERE id = @id
+    `),
+    // The user picking a watched card by hand. watch_locked pins it so the
+    // next check's automatic reassignment can't undo the choice; passing
+    // locked = 0 releases it back to automatic.
+    setListingWatch: db.prepare(`
+      UPDATE listings SET watch_id = @watchId, match_score = @matchScore,
+        match_specificity = @matchSpecificity, watch_locked = @locked
+      WHERE id = @id
+    `),
+    // Every enabled watch, with the fields the match layer needs to decide
+    // which ones a given listing title could belong to.
+    listWatchTargets: db.prepare(`
+      SELECT w.id, w.card_id, w.grading_company, w.grade, w.description,
+             COALESCE(c.name, w.description) AS card_name,
+             c.set_name, c.year, c.card_number, c.parallel, p.name AS player_name
+      FROM watches w
+      LEFT JOIN cards c ON c.id = w.card_id
+      LEFT JOIN players p ON p.id = c.player_id
+      WHERE w.enabled = 1
     `),
     // A re-sighting refreshes the live fields and resets the staleness
     // counter. url is refreshed too, so rows stored before an adapter's

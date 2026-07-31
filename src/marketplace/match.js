@@ -125,6 +125,87 @@ export function anyGradeRegex(company) {
   );
 }
 
+// --- parallel gate ---------------------------------------------------------
+// A parallel is part of a card's IDENTITY, not a nice-to-have: "Row 0" and
+// "Row 2" are different cards at wildly different prices, and a plain base
+// card is not a "Members Only". Treating it as a soft 0.2 score component
+// meant a Members-Only watch matched a base-card title at 0.80, and a
+// "Row 0" watch matched a "Row 2" title at 0.90 (both live-observed).
+
+// Plural-tolerant token presence ("Sticker" watch vs "Stickers" title).
+const hasToken = (tokens, t) =>
+  tokens.has(t) || tokens.has(`${t}s`) || (t.endsWith('s') && tokens.has(t.slice(0, -1)));
+
+// What the parallel actually contributes beyond year/set/player, plus any
+// "<word> <identifier>" pairs ("row 0", "sf 4") that a rival parallel can
+// contradict. Exported for tests.
+// Catalog vocabulary that never appears in a seller's title: "Base" is how
+// the Ladder labels the plain version of a card, so a "Base /2000" parallel
+// demanding the word "base" drops every real listing of that card.
+const PARALLEL_STOPWORDS = new Set(['base']);
+
+export function parallelEvidence(target) {
+  const par = tokenize(target.parallel ?? '');
+  if (par.length === 0) return { needed: [], pairs: [] };
+  // Tokens the rest of the identity already supplies aren't evidence that
+  // THIS parallel is present ("Stadium Club Members Only" -> club is not).
+  const covered = new Set([target.year, target.setName, target.playerName].flatMap(tokenize));
+  const needed = par.filter((t) => !covered.has(t) && !PARALLEL_STOPWORDS.has(t));
+  const pairs = [];
+  for (let i = 0; i < par.length - 1; i++) {
+    if (/^[a-z]+$/.test(par[i]) && /^[a-z]?\d+[a-z]?$/.test(par[i + 1])) pairs.push([par[i], par[i + 1]]);
+  }
+  return { needed, pairs };
+}
+
+// Reasons this title fails the watch's parallel, if any.
+//
+// Strictness is CONDITIONAL on target.siblingParallels — the parallels of
+// other catalog cards sharing this card's year+set+player+number:
+//   * No siblings -> the parallel isn't discriminating, so absence proves
+//     nothing. The 1993 SP Derek Jeter #279 is the only #279 Jeter; its
+//     catalog label "Foil" is decorative and sellers never write it, so
+//     demanding it would drop every real listing (live-measured: 79 of 445).
+//   * Siblings exist -> the parallel is the ONLY thing separating four
+//     different Stadium Club Jordan #1s, so it must actually appear, and a
+//     sibling's distinctive words appearing instead means it's that card.
+// A contradiction ("Row 0" watch, "Row 2" title) always fails, siblings or
+// not — that's self-evidently a different card.
+export function parallelFailures(target, titleTokenSet, titleSeq) {
+  const { needed, pairs } = parallelEvidence(target);
+  const out = [];
+
+  for (const [word, id] of pairs) {
+    for (let i = 0; i < titleSeq.length - 1; i++) {
+      if (titleSeq[i] === word && /^[a-z]?\d+[a-z]?$/.test(titleSeq[i + 1]) && titleSeq[i + 1] !== id) {
+        out.push(`parallel-conflict:${word} ${titleSeq[i + 1]} not ${id}`);
+        break;
+      }
+    }
+  }
+
+  const siblings = target.siblingParallels ?? [];
+  if (siblings.length === 0) return out; // not discriminating — stay lenient
+
+  if (needed.length > 0 && !needed.some((t) => hasToken(titleTokenSet, t))) {
+    out.push(`parallel:${needed.join(' ')}`);
+  }
+
+  // The reverse direction: a sibling's distinguishing words are all present
+  // and this watch doesn't share them, so the title is the SIBLING's card.
+  // This is what stops a base-card watch matching a "Members Only" listing.
+  const mine = new Set(tokenize(target.parallel ?? ''));
+  const covered = new Set([target.year, target.setName, target.playerName].flatMap(tokenize));
+  for (const sp of siblings.filter(Boolean)) {
+    const distinct = tokenize(sp).filter((t) => !mine.has(t) && !covered.has(t));
+    if (distinct.length > 0 && distinct.every((t) => hasToken(titleTokenSet, t))) {
+      out.push(`sibling-parallel:${sp}`);
+      break;
+    }
+  }
+  return out;
+}
+
 export const isUngraded = (company, grade) =>
   String(company ?? '').toLowerCase() === 'none' || String(grade ?? '').toLowerCase() === 'raw';
 
@@ -269,6 +350,10 @@ export function scoreListing(target, title) {
   if (setTokens.length > 0 && !setTokens.some((t) => tokens.has(t))) {
     missing.push(`set:${setTokens.join(' ')}`);
   }
+  // Parallel is identity, same as year/player/set — see parallelFailures.
+  const parFails = parallelFailures(target, tokens, tokenize(raw));
+  if (parFails.length > 0) missing.push(...parFails);
+  else if (target.parallel) matched.push(`parallel:${target.parallel}`);
   if (missing.length > 0) {
     return { ok: false, score: 0, specificity: 0, debug: { matched, missing, penalties } };
   }

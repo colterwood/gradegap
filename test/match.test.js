@@ -290,6 +290,70 @@ test('specificity: the subset watch and the superset watch both score, the speci
   assert.ok(bt.specificity > b.specificity, `${bt.specificity} vs ${b.specificity}`);
 });
 
+// --- the parallel gate -----------------------------------------------------
+
+// 1992 Stadium Club Jordan #1 exists four ways; the parallel is the ONLY
+// thing telling them apart, so every one of these carries its siblings.
+const sc = (parallel) => ({
+  playerName: 'Michael Jordan', year: 1992, setName: 'Stadium Club', cardNumber: '1',
+  parallel, company: 'BGS', grade: '9',
+  siblingParallels: [null, 'Members Only', 'Beam Team', 'Beam Team Members Only'].filter((p) => p !== parallel),
+});
+
+test('parallel gate: a parallel watch rejects the plain base-card title', () => {
+  const base = '1992-93 Topps Stadium Club Michael Jordan #1 BGS 9 Chicago Bulls';
+  // Live failure: this scored 0.80 against BOTH Members-Only watches.
+  assert.equal(scoreListing(sc('Members Only'), base).ok, false);
+  assert.equal(scoreListing(sc('Beam Team Members Only'), base).ok, false);
+  // The base-card watch is the one that should take it.
+  assert.equal(scoreListing(sc(null), base).ok, true);
+});
+
+test('parallel gate: the base-card watch rejects a parallel title', () => {
+  const beam = '1992-93 Stadium Club Beam Team Members Only Michael Jordan #1 BGS 9';
+  assert.equal(scoreListing(sc(null), beam).ok, false, 'base watch must not take a Beam Team listing');
+  assert.equal(scoreListing(sc('Beam Team Members Only'), beam).ok, true);
+});
+
+test('parallel gate: a contradicted identifier is a hard fail (Row 0 vs Row 2)', () => {
+  const row = (n) => ({
+    playerName: 'Michael Jordan', year: 1996, setName: 'Flair Showcase', cardNumber: '23',
+    parallel: `Row ${n}`, company: 'BGS', grade: '9',
+    siblingParallels: ['Row 0', 'Row 1', 'Row 2'].filter((p) => p !== `Row ${n}`),
+  });
+  const title = '1996-97 Flair Showcase Row 2 #23 Michael Jordan BGS 9';
+  assert.equal(scoreListing(row(0), title).ok, false);
+  assert.equal(scoreListing(row(1), title).ok, false);
+  assert.equal(scoreListing(row(2), title).ok, true);
+});
+
+test('parallel gate stays lenient when the parallel is not discriminating', () => {
+  // The 1993 SP #279 Jeter is the ONLY card with that identity — its
+  // catalog "Foil" label is decorative and sellers never write it.
+  // Demanding it dropped 79 of 445 real listings when first measured.
+  const jeter = {
+    playerName: 'Derek Jeter', year: 1993, setName: 'SP', cardNumber: '279',
+    parallel: 'Foil', company: 'BGS', grade: '9', siblingParallels: [],
+  };
+  for (const t of [
+    '1993 UD SP Derek Jeter RC # 279 BGS 9 MINT',
+    '1993 Upper Deck SP Derek Jeter #279 RC BGS 9 Mint',
+    '1993 SP DEREK JETER BGS 9',
+  ]) {
+    assert.equal(scoreListing(jeter, t).ok, true, t);
+  }
+});
+
+test('parallel gate: "Base" is catalog vocabulary, never required of a seller', () => {
+  const brady = {
+    playerName: 'Tom Brady', year: 2000, setName: 'Fleer Showcase', cardNumber: '136',
+    parallel: 'Base /2000', company: 'BGS', grade: '8', siblingParallels: ['Legacy'],
+  };
+  assert.equal(scoreListing(brady, '2000 FLEER SHOWCASE #136 TOM BRADY BGS 8').ok, true);
+  // But a real sibling's word showing up still hands it to the sibling.
+  assert.equal(scoreListing(brady, '2000 Fleer Showcase Legacy #136 Tom Brady BGS 8').ok, false);
+});
+
 // --- manual watches (hand-added on the Watched tab) ------------------------
 
 const manual = (over = {}) => ({

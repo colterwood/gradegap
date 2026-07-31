@@ -324,6 +324,29 @@ test('reassignment preserves the user-owned flags', async () => {
   assert.equal(after.followed, 1, 'still followed — the flag is the user\'s, not the watch\'s');
 });
 
+test('a hand-pinned watched card survives the next check', async () => {
+  const { db, q, runner, card } = await freshWatched();
+  await runner.start({});
+  await waitUntilDone(runner);
+
+  const listing = q.getListingByKey.get('mockmarket', 'mkt-auction-1');
+  q.insertWatch.run({ cardId: card.id, gradingCompany: 'BGS', grade: '9', maxPrice: null });
+  const other = q.getWatchByKey.get(card.id, 'BGS', '9');
+
+  // The user pins it to a deliberately worse-matching watch.
+  q.setListingWatch.run({ id: listing.id, watchId: other.id, matchScore: 0.3, matchSpecificity: 1, locked: 1 });
+
+  await runner.start({});
+  await waitUntilDone(runner);
+  assert.equal(q.getListingById.get(listing.id).watch_id, other.id, 'the pin outranks the scorer');
+
+  // Releasing the pin lets automatic reassignment take it back.
+  db.prepare('UPDATE listings SET watch_locked = 0 WHERE id = ?').run(listing.id);
+  await runner.start({});
+  await waitUntilDone(runner);
+  assert.notEqual(q.getListingById.get(listing.id).watch_id, other.id, 'released -> scorer owns it again');
+});
+
 test('orderSources: priority names first, stragglers keep registry order', () => {
   const s = (name) => ({ name });
   const input = ['miller', 'alt', 'woocommerce', 'ebay', 'shopify', 'fanatics', 'comc'].map(s);

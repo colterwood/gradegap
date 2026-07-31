@@ -98,6 +98,16 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
   // flushed by notifyAfterRun. Kept on the runner (not per-call) so tests
   // and status() can see what the last run found.
   let priceDrops = [];
+  // Sibling parallels per card, memoized: the same watch is scored once per
+  // source (15x per run), and the catalog doesn't change mid-run.
+  const siblingCache = new Map();
+  function siblingsFor(cardId) {
+    if (cardId == null) return [];
+    if (!siblingCache.has(cardId)) {
+      siblingCache.set(cardId, q.siblingParallels.all(cardId).map((r) => r.parallel));
+    }
+    return siblingCache.get(cardId);
+  }
 
   function status() {
     const run = q.latestWatchRun.get() ?? null;
@@ -143,8 +153,9 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
             currency: existing.currency ?? 'USD',
           });
         }
-        // Contested listing: hand it to this watch if it matches better.
-        if (existing.watch_id !== watch.id && isBetterOwner(score, existing)) {
+        // Contested listing: hand it to this watch if it matches better —
+        // unless the user pinned the owner by hand, which always wins.
+        if (!existing.watch_locked && existing.watch_id !== watch.id && isBetterOwner(score, existing)) {
           q.reassignListing.run({
             id: existing.id,
             watchId: watch.id,
@@ -214,6 +225,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
           parallel: watch.parallel,
           company: watch.grading_company,
           grade: watch.grade,
+          siblingParallels: siblingsFor(watch.card_id),
         };
     // A user-edited search term replaces the generated queries VERBATIM (no
     // loose fallback — an override means "send exactly this"). Scoring is

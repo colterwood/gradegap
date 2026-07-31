@@ -118,6 +118,9 @@ CREATE TABLE IF NOT EXISTS listings (
   -- Breaks ties when two watches both score 1.0 on one listing: the more
   -- specific watch (whose identity explains more of the title) owns it.
   match_specificity INTEGER,
+  -- Set when the USER picks the watched card by hand. Auto-reassignment
+  -- then leaves the row alone — a human decision outranks the scorer.
+  watch_locked   INTEGER NOT NULL DEFAULT 0,
   match_debug    TEXT,
   status         TEXT NOT NULL DEFAULT 'new'
                  CHECK (status IN ('new','notified')),
