@@ -164,7 +164,10 @@ export function makeWatchRouter(db, q, watchRunner) {
       .map((s) => s.trim())
       .filter((s) => ['new', 'notified'].includes(s));
     const watchId = parseInt(req.query.watchId, 10) || null;
-    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
+    // The badge counts every live listing, so the table must be able to
+    // show every live listing — a 200 default silently truncated the view
+    // (445 live, 200 rendered) and made the badge look wrong.
+    const limit = Math.min(parseInt(req.query.limit, 10) || 5000, 20000);
     // followed=1 -> Following tab; followed=0 -> unfollowed only; absent -> all.
     const followed = req.query.followed === '1' ? 1 : req.query.followed === '0' ? 0 : null;
     const rows = q.listMatches.all({ watchId, statuses: `|${statuses.join('|')}|`, limit, followed });

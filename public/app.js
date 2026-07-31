@@ -837,14 +837,16 @@ $('add-watch').addEventListener('submit', async (e) => {
   }
 });
 
+// limit is explicit so the table can never silently show fewer rows than
+// the badge counts.
 async function loadListingsView() {
-  listingViews.listings.rows = await api('/api/matches?status=new,notified');
+  listingViews.listings.rows = await api('/api/matches?status=new,notified&limit=20000');
   renderMatches('listings');
   await refreshWatchBadge();
 }
 
 async function loadFollowingView() {
-  listingViews.following.rows = await api('/api/matches?status=new,notified&followed=1');
+  listingViews.following.rows = await api('/api/matches?status=new,notified&followed=1&limit=20000');
   renderMatches('following');
 }
 

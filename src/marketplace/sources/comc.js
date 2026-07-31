@@ -57,7 +57,11 @@ export function createComcSource() {
   return {
     name: 'comc',
     needsBrowser: false,
-    minIntervalMs: 3000,
+    // COMC 429s well before a full watch list is covered: at 3s it died
+    // ~57 requests in, and the 30-minute source backoff then skipped the
+    // remaining 194 — so COMC could never cover the list no matter how many
+    // runs happened. Slower is the only lever that avoids the block outright.
+    minIntervalMs: 8000,
 
     async start() {},
 
