@@ -30,6 +30,15 @@ export function parseHeritageEnds(text, now = Date.now()) {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+// The search URL Heritage actually serves. The older
+// /c/search-results.zx?Ntt=… form 302s to this one, and the render happens
+// only after that hop — which is what the adapter used to race. Exported so
+// a regression back to the redirecting form is caught by a test.
+export function heritageSearchUrl(text) {
+  const params = new URLSearchParams({ term: text, mode: 'live', layout: 'list' });
+  return `${SITE}/c/search/results.zx?${params}`;
+}
+
 export function createHeritageSource() {
   let lease = null;
   let page = null;
@@ -45,9 +54,24 @@ export function createHeritageSource() {
     },
 
     async search({ text }) {
-      const params = new URLSearchParams({ Ntt: text, mode: 'live', layout: 'list' });
-      await gotoStable(page, `${SITE}/c/search-results.zx?${params}`);
-      await page.waitForTimeout(2000);
+      // Heritage REDIRECTS this URL (/c/search-results.zx?Ntt=… becomes
+      // /c/search/results.zx?term=…) and only then renders the tiles, so the
+      // old fixed 2s wait raced the redirect + render and returned 0 for
+      // essentially every watch (252 searches, 1 listing stored). Verified
+      // in a real browser: the same query yields 5 lots including the
+      // BGS 8 Jordan rookie. Request the post-redirect URL directly and
+      // wait for a definite outcome — tiles, or Heritage's own .no-results.
+      await gotoStable(page, heritageSearchUrl(text));
+
+      const deadline = Date.now() + 20_000;
+      let tiles = 0;
+      while (Date.now() < deadline) {
+        tiles = await page.locator('.item-block').count().catch(() => 0);
+        if (tiles > 0) break;
+        if (await page.locator('.no-results').count().catch(() => 0)) break; // genuinely nothing
+        await page.waitForTimeout(500);
+      }
+      debugLog('heritage', `"${text}" -> ${tiles} tiles at ${page.url()}`);
 
       // One .item-block per lot (usually an <li>); id = "{saleNo}-{itemId}".
       const results = await page.$$eval('.item-block', (blocks) =>

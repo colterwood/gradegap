@@ -767,3 +767,17 @@ test('alt: slab-less titles get grader+grade folded in from metadata', async () 
   const bare = mapAltListing({ id: 'ast_11', name: '1986 Fleer Michael Jordan #57', lowestAsk: 5000 });
   assert.equal(bare.title, '1986 Fleer Michael Jordan #57');
 });
+
+test('heritage: searches the URL Heritage actually serves, not the redirecting one', async () => {
+  const { heritageSearchUrl } = await import('../src/marketplace/sources/heritage.js');
+  const url = heritageSearchUrl('1986 Fleer Michael Jordan BGS 8');
+  // Live-verified 2026-07-31: /c/search-results.zx?Ntt= 302s to this form and
+  // renders only after the hop, which the old fixed 2s wait raced — 252
+  // searches produced 1 stored listing. This URL serves tiles immediately.
+  assert.equal(
+    url,
+    'https://sports.ha.com/c/search/results.zx?term=1986+Fleer+Michael+Jordan+BGS+8&mode=live&layout=list'
+  );
+  assert.ok(!url.includes('search-results.zx'), 'must not use the redirecting path');
+  assert.ok(!url.includes('Ntt='), 'must not use the old Ntt parameter');
+});
