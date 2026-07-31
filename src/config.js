@@ -124,7 +124,11 @@ export const config = {
   appBaseUrl: (process.env.APP_BASE_URL || '').replace(/\/+$/, ''),
   dataDir: path.join(ROOT, 'data'),
   capturesDir: path.join(ROOT, 'captures'),
-  profileDir: path.join(ROOT, 'profile'),
+  // The Playwright profile. Only ONE Chromium may lock a profile directory,
+  // so a running check owns ./profile for its whole duration — PROFILE_DIR
+  // lets a one-off (scripts/testSource.js --scratch-profile) work in a
+  // throwaway copy instead of waiting hours for the check to finish.
+  profileDir: process.env.PROFILE_DIR ? path.resolve(process.env.PROFILE_DIR) : path.join(ROOT, 'profile'),
   publicDir: path.join(ROOT, 'public'),
 };
 
