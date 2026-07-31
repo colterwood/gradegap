@@ -369,6 +369,38 @@ test('a hand-pinned watched card survives the next check', async () => {
   assert.notEqual(q.getListingById.get(listing.id).watch_id, other.id, 'released -> scorer owns it again');
 });
 
+test('per-source stats back the Sources tab', async () => {
+  const { q, runner } = await freshWatched();
+  const runId = await runner.start({});
+  await waitUntilDone(runner);
+
+  const stats = q.watchRunSourceStats.all(runId);
+  assert.equal(stats.length, 1, 'one source in mock mode');
+  assert.equal(stats[0].source, 'mockmarket');
+  assert.ok(stats[0].done > 0);
+  assert.equal(stats[0].pending, 0);
+  assert.equal(stats[0].failed, 0);
+
+  const counts = q.listingCountsBySource.all();
+  assert.equal(counts[0].source, 'mockmarket');
+  assert.ok(counts[0].n > 0);
+
+  // source_state is seeded by the run, so the tab can report backoff/enabled.
+  assert.ok(q.listSourceState.all().some((s) => s.source === 'mockmarket'));
+});
+
+test('a check can be limited to selected sources', async () => {
+  const { q, runner } = await freshWatched();
+  // "Check Selected" with a source that isn't configured -> nothing to do.
+  await assert.rejects(() => runner.start({ only: ['ebay'] }), (err) => err.code === 400);
+
+  // The configured one runs normally.
+  const runId = await runner.start({ only: ['mockmarket'] });
+  await waitUntilDone(runner);
+  const stats = q.watchRunSourceStats.all(runId);
+  assert.deepEqual(stats.map((s) => s.source), ['mockmarket']);
+});
+
 test('orderSources: priority names first, stragglers keep registry order', () => {
   const s = (name) => ({ name });
   const input = ['miller', 'alt', 'woocommerce', 'ebay', 'shopify', 'fanatics', 'comc'].map(s);

@@ -33,6 +33,7 @@
     <button class="tab" data-view="watched">Watched</button>
     <button class="tab" data-view="listings">Listings <span id="watched-badge" class="badge" hidden></span></button>
     <button class="tab" data-view="following">Following</button>
+    <button class="tab" data-view="sources">Sources</button>
   </nav>
 
   <div id="view-disparity">
@@ -135,7 +136,7 @@
         <h2>Watched cards</h2>
         <div class="sync">
           <span id="check-info" class="sync-info"></span>
-          <button id="check-btn">Check now</button>
+          <button id="check-btn" title="Check every configured source">Check All</button>
           <button id="check-cancel-btn" class="secondary" hidden>Cancel</button>
         </div>
       </div>
@@ -252,6 +253,39 @@
         <tbody></tbody>
       </table>
       <p id="following-empty" class="empty" hidden></p>
+    </main>
+  </div>
+
+  <div id="view-sources" hidden>
+    <main>
+      <div class="watched-head">
+        <h2>Sources</h2>
+        <div class="sync">
+          <span id="sources-info" class="sync-info"></span>
+          <button id="check-selected-btn" class="secondary"
+                  title="Run a check against only the ticked sources — useful for re-running one that errored or was rate limited">Check Selected</button>
+          <button id="check-all-btn" title="Check every configured source">Check All</button>
+          <button id="sources-cancel-btn" class="secondary" hidden>Cancel</button>
+        </div>
+      </div>
+      <div id="sources-progress" class="progress progress-inline" hidden>
+        <span id="sources-progress-text"></span>
+      </div>
+      <table id="sources-table">
+        <thead>
+          <tr>
+            <th class="watch-col"><input type="checkbox" id="sources-all-cb" checked title="Select/deselect every source" /></th>
+            <th>Source</th>
+            <th class="num" title="Watches checked successfully in the latest run">Done</th>
+            <th class="num" title="Watches that errored in the latest run">Failed</th>
+            <th class="num" title="Watches not yet reached in the latest run">Pending</th>
+            <th class="num" title="Live listings currently attributed to this source">Listings</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="sources-empty" class="empty" hidden>No sources configured — set WATCH_SOURCES in .env.</p>
     </main>
   </div>
 

@@ -5,7 +5,9 @@ import {
   COMPARE_GRADES,
   MANUAL_GRADERS,
   MANUAL_GRADES,
+  config,
 } from '../config.js';
+import { REGISTRY, resolveSourceNames } from '../marketplace/sources/index.js';
 import { buildQueries, scoreListing } from '../marketplace/match.js';
 
 // The automatic search query for a watch row — same construction the
@@ -236,10 +238,58 @@ export function makeWatchRouter(db, q, watchRunner) {
     res.json({ ok: true });
   });
 
+  // Per-source dashboard: how the latest run went for each source, what it
+  // is holding, and why it is idle (disabled / in 429 backoff / missing
+  // setup). Every configured source appears even if it never ran.
+  router.get('/sources', async (_req, res) => {
+    const run = q.latestWatchRun.get() ?? null;
+    const stats = new Map((run ? q.watchRunSourceStats.all(run.id) : []).map((r) => [r.source, r]));
+    const listings = new Map(q.listingCountsBySource.all().map((r) => [r.source, r.n]));
+    const state = new Map(q.listSourceState.all().map((r) => [r.source, r]));
+    // Distinct failure reasons this run, most common first, per source.
+    const errors = new Map();
+    for (const f of run ? q.watchRunFailures.all(run.id) : []) {
+      if (!errors.has(f.source)) errors.set(f.source, { error: f.error, n: f.n });
+    }
+    const status = watchRunner.status();
+    const skipped = new Map((status.skippedSources ?? []).map((s) => [s.name, s.reason]));
+
+    const names = resolveSourceNames(config.watchSources).filter((n) => REGISTRY[n]);
+    res.json({
+      running: status.running,
+      run: run ? { id: run.id, started_at: run.started_at, finished_at: run.finished_at, status: run.status } : null,
+      sources: names.map((name) => {
+        const s = stats.get(name) ?? {};
+        const st = state.get(name) ?? {};
+        return {
+          name,
+          done: s.done ?? 0,
+          failed: s.failed ?? 0,
+          pending: s.pending ?? 0,
+          listings: listings.get(name) ?? 0,
+          enabled: st.enabled == null ? 1 : st.enabled,
+          backoffUntil: st.backoff_until ?? null,
+          lastRequestAt: st.last_request_at ?? null,
+          error: errors.get(name)?.error ?? null,
+          errorCount: errors.get(name)?.n ?? 0,
+          skippedReason: skipped.get(name) ?? null,
+        };
+      }),
+    });
+  });
+
   router.post('/watch-check', (req, res) => {
+    // sources: [] / omitted -> every configured source ("Check All").
+    // A named subset runs only those ("Check Selected"), so one broken or
+    // rate-limited source can be re-run without redoing the whole list.
+    const raw = req.body?.sources;
+    const only = Array.isArray(raw) && raw.length > 0 ? raw.filter((n) => REGISTRY[n]) : null;
+    if (Array.isArray(raw) && raw.length > 0 && (!only || only.length === 0)) {
+      return res.status(400).json({ ok: false, error: 'no valid sources selected' });
+    }
     watchRunner
-      .start({ trigger: 'manual' })
-      .then((runId) => res.json({ ok: true, runId }))
+      .start({ trigger: 'manual', only })
+      .then((runId) => res.json({ ok: true, runId, sources: only }))
       .catch((err) => res.status(err.code === 409 ? 409 : 400).json({ ok: false, error: err.message }));
   });
 

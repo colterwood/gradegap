@@ -284,6 +284,13 @@ select.watch-pick {
   color: var(--ink);
 }
 .pin { font-size: 11px; }
+
+/* sources tab */
+#sources-table td.src-status { font-size: 12px; }
+.src-ok { color: var(--green); font-weight: 600; }
+.src-warn { color: #8a6d00; background: var(--amber-bg); border-radius: 6px; padding: 1px 6px; }
+.src-bad { color: var(--red); }
+.src-muted { color: var(--muted); }
 .native-price { color: var(--muted); font-size: 12px; }
 .time-left { font-size: 12px; color: var(--green); font-weight: 600; }
 .score-low {

@@ -542,9 +542,11 @@ function switchView(view) {
   $('view-watched').hidden = view !== 'watched';
   $('view-listings').hidden = view !== 'listings';
   $('view-following').hidden = view !== 'following';
+  $('view-sources').hidden = view !== 'sources';
   if (view === 'watched') loadWatchedView().catch((err) => setError(err.message));
   if (view === 'listings') loadListingsView().catch((err) => setError(err.message));
   if (view === 'following') loadFollowingView().catch((err) => setError(err.message));
+  if (view === 'sources') loadSourcesView().catch((err) => setError(err.message));
 }
 
 document.querySelector('.tabs').addEventListener('click', (e) => {
@@ -999,6 +1001,144 @@ for (const [viewKey, inputId] of [['listings', 'listing-search'], ['following', 
   });
 }
 
+// --- sources view ---
+
+// Which sources "Check Selected" will run. Every source starts ticked; the
+// set is remembered across re-renders so a poll doesn't undo a choice.
+const sourceSelection = new Set();
+let sourcesSeeded = false;
+
+// One-line account of why a source is or isn't doing anything, most
+// actionable first — this is the column that answers "why did it return
+// nothing?" without digging through the DB.
+function sourceStatus(s) {
+  if (!s.enabled) return '<span class="src-bad">disabled</span>';
+  if (s.skippedReason) return `<span class="src-warn">skipped — ${esc(s.skippedReason)}</span>`;
+  if (s.backoffUntil && s.backoffUntil > new Date().toISOString().slice(0, 19).replace('T', ' ')) {
+    return `<span class="src-warn">rate-limit backoff until ${esc(s.backoffUntil)} UTC</span>`;
+  }
+  if (s.error) {
+    return `<span class="src-bad" title="${esc(s.error)}">${esc(String(s.error).slice(0, 70))}${
+      s.errorCount > 1 ? ` (×${s.errorCount})` : ''
+    }</span>`;
+  }
+  if (s.pending > 0) return '<span class="src-muted">queued</span>';
+  if (s.done > 0 && s.listings === 0) return '<span class="src-warn">ran, found nothing</span>';
+  if (s.done > 0) return '<span class="src-ok">ok</span>';
+  return '<span class="src-muted">—</span>';
+}
+
+function renderSources(data) {
+  const tbody = document.querySelector('#sources-table tbody');
+  tbody.innerHTML = '';
+  for (const s of data.sources) {
+    if (!sourcesSeeded) sourceSelection.add(s.name); // default: all ticked
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="watch-cell"><input type="checkbox" class="source-cb" data-name="${esc(s.name)}"
+        ${sourceSelection.has(s.name) ? 'checked' : ''} /></td>
+      <td><span class="source-badge">${esc(s.name)}</span></td>
+      <td class="num">${s.done}</td>
+      <td class="num ${s.failed > 0 ? 'neg' : ''}">${s.failed}</td>
+      <td class="num">${s.pending}</td>
+      <td class="num">${s.listings}</td>
+      <td class="src-status">${sourceStatus(s)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  sourcesSeeded = true;
+  $('sources-table').hidden = data.sources.length === 0;
+  $('sources-empty').hidden = data.sources.length > 0;
+
+  const totals = data.sources.reduce(
+    (a, s) => ({ done: a.done + s.done, failed: a.failed + s.failed, pending: a.pending + s.pending, listings: a.listings + s.listings }),
+    { done: 0, failed: 0, pending: 0, listings: 0 }
+  );
+  const run = data.run;
+  $('sources-info').textContent = run
+    ? `Run ${run.id} (${run.status}) · ${totals.done} done · ${totals.failed} failed · ${totals.pending} pending · ${totals.listings} listings`
+    : 'No check has run yet';
+  syncSelectAllBox();
+}
+
+function syncSelectAllBox() {
+  const boxes = [...document.querySelectorAll('#sources-table .source-cb')];
+  const all = boxes.length > 0 && boxes.every((b) => b.checked);
+  const none = boxes.every((b) => !b.checked);
+  const master = $('sources-all-cb');
+  master.checked = all;
+  master.indeterminate = !all && !none;
+}
+
+async function loadSourcesView() {
+  let data;
+  try {
+    data = await api('/api/sources');
+  } catch (err) {
+    // public/ is served fresh but src/ is baked into the running process, so
+    // this tab exists in the browser before the server knows the endpoint.
+    $('sources-table').hidden = true;
+    const empty = $('sources-empty');
+    empty.hidden = false;
+    empty.textContent = /404|not found/i.test(err.message)
+      ? 'Restart the server to enable this tab (it needs the new /api/sources endpoint).'
+      : err.message;
+    return;
+  }
+  renderSources(data);
+  await refreshCheckStatus();
+}
+
+document.querySelector('#sources-table tbody').addEventListener('change', (e) => {
+  const cb = e.target.closest('input.source-cb');
+  if (!cb) return;
+  if (cb.checked) sourceSelection.add(cb.dataset.name);
+  else sourceSelection.delete(cb.dataset.name);
+  syncSelectAllBox();
+});
+
+$('sources-all-cb').addEventListener('change', (e) => {
+  for (const cb of document.querySelectorAll('#sources-table .source-cb')) {
+    cb.checked = e.target.checked;
+    if (cb.checked) sourceSelection.add(cb.dataset.name);
+    else sourceSelection.delete(cb.dataset.name);
+  }
+  syncSelectAllBox();
+});
+
+// Kick off a check. sources = null runs everything; an array runs only those.
+async function startCheck(sources) {
+  setError('');
+  try {
+    await api('/api/watch-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sources ? { sources } : {}),
+    });
+    checkWasRunning = true;
+    await refreshCheckStatus();
+    if (currentView === 'sources') await loadSourcesView().catch(() => {});
+    if (!checkPollTimer) checkPollTimer = setInterval(() => refreshCheckStatus().catch(() => {}), 2000);
+  } catch (err) {
+    setError(err.message);
+  }
+}
+
+$('check-all-btn').addEventListener('click', () => startCheck(null));
+$('check-selected-btn').addEventListener('click', () => {
+  const picked = [...document.querySelectorAll('#sources-table .source-cb')]
+    .filter((cb) => cb.checked)
+    .map((cb) => cb.dataset.name);
+  if (picked.length === 0) {
+    setError('Tick at least one source, or use Check All.');
+    return;
+  }
+  startCheck(picked);
+});
+$('sources-cancel-btn').addEventListener('click', () =>
+  api('/api/watch-check/cancel', { method: 'POST' }).catch(() => {})
+);
+
 // --- check-now + status ---
 
 async function refreshCheckStatus() {
@@ -1007,10 +1147,17 @@ async function refreshCheckStatus() {
   $('check-btn').disabled = s.running;
   $('check-cancel-btn').hidden = !s.running;
   $('check-progress').hidden = !s.running;
+  // The Sources tab drives the same run, so its controls mirror these.
+  $('check-all-btn').disabled = s.running;
+  $('check-selected-btn').disabled = s.running;
+  $('sources-cancel-btn').hidden = !s.running;
+  $('sources-progress').hidden = !s.running;
   if (s.running && s.run) {
     const { items_total, items_processed } = s.run;
     const label = s.currentLabel || 'Starting…';
-    $('check-progress-text').textContent = `${label}   ·   ${items_processed} / ${items_total} checks`;
+    const text = `${label}   ·   ${items_processed} / ${items_total} checks`;
+    $('check-progress-text').textContent = text;
+    $('sources-progress-text').textContent = text;
   }
   if (!s.running && s.run) {
     if (s.run.status === 'completed') {
@@ -1036,6 +1183,7 @@ async function refreshCheckStatus() {
     await loadWatches().catch(() => {});
     if (currentView === 'listings') await loadListingsView().catch(() => {});
     if (currentView === 'following') await loadFollowingView().catch(() => {});
+    if (currentView === 'sources') await loadSourcesView().catch(() => {});
   }
   checkWasRunning = s.running;
   return s;
@@ -1057,17 +1205,7 @@ async function refreshWatchBadge() {
   }
 }
 
-$('check-btn').addEventListener('click', async () => {
-  setError('');
-  try {
-    await api('/api/watch-check', { method: 'POST' });
-    checkWasRunning = true;
-    await refreshCheckStatus();
-    if (!checkPollTimer) checkPollTimer = setInterval(() => refreshCheckStatus().catch(() => {}), 2000);
-  } catch (err) {
-    setError(err.message);
-  }
-});
+$('check-btn').addEventListener('click', () => startCheck(null));
 
 $('check-cancel-btn').addEventListener('click', () => api('/api/watch-check/cancel', { method: 'POST' }).catch(() => {}));
 
@@ -1092,6 +1230,7 @@ $('check-cancel-btn').addEventListener('click', () => api('/api/watch-check/canc
     if (location.hash === '#watched') switchView('watched');
     if (location.hash === '#listings') switchView('listings');
     if (location.hash === '#following') switchView('following');
+    if (location.hash === '#sources') switchView('sources');
   } catch (err) {
     setError(err.message);
   }

@@ -461,6 +461,22 @@ export function makeQueries(db) {
       UPDATE watch_check_items SET status = @status, attempts = attempts + 1, error = @error WHERE id = @id
     `),
 
+    // Per-source progress for one run — drives the Sources tab.
+    watchRunSourceStats: db.prepare(`
+      SELECT source,
+             SUM(status = 'done') AS done,
+             SUM(status = 'failed') AS failed,
+             SUM(status = 'pending') AS pending
+      FROM watch_check_items WHERE run_id = ?
+      GROUP BY source
+    `),
+    // Live listings currently attributed to each source.
+    listingCountsBySource: db.prepare(`
+      SELECT source, COUNT(*) AS n FROM listings
+      WHERE status IN ('new','notified') GROUP BY source
+    `),
+    listSourceState: db.prepare(`SELECT * FROM source_state`),
+
     ensureSourceState: db.prepare(`INSERT INTO source_state (source) VALUES (?) ON CONFLICT(source) DO NOTHING`),
     getSourceState: db.prepare(`SELECT * FROM source_state WHERE source = ?`),
     setSourceBackoff: db.prepare(`UPDATE source_state SET backoff_until = ? WHERE source = ?`),
