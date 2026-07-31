@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS watches (
   grading_company  TEXT NOT NULL,
   grade            TEXT NOT NULL,
   max_price        REAL,
+  -- User override for the marketplace search query. NULL = automatic
+  -- (built from the card's fields). Non-null is sent VERBATIM as the one
+  -- query — no loose fallback — but results are still verified by the
+  -- match layer against the card's real identity either way.
+  search_term      TEXT,
   enabled          INTEGER NOT NULL DEFAULT 1,
   created_at       TEXT NOT NULL DEFAULT (datetime('now')),
   last_checked_at  TEXT,

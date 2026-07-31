@@ -256,6 +256,7 @@ export function makeQueries(db) {
     countEnabledWatches: db.prepare(`SELECT COUNT(*) AS n FROM watches WHERE enabled = 1`),
     setWatchEnabled: db.prepare(`UPDATE watches SET enabled = ? WHERE id = ?`),
     setWatchMaxPrice: db.prepare(`UPDATE watches SET max_price = ? WHERE id = ?`),
+    setWatchSearchTerm: db.prepare(`UPDATE watches SET search_term = ? WHERE id = ?`),
     touchWatchChecked: db.prepare(`UPDATE watches SET last_checked_at = datetime('now') WHERE id = ?`),
     deleteWatchListings: db.prepare(`DELETE FROM listings WHERE watch_id = ?`),
     deleteWatchItems: db.prepare(`DELETE FROM watch_check_items WHERE watch_id = ?`),

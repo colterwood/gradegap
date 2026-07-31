@@ -13,6 +13,39 @@ import { withTimeout } from './sources/util.js';
 import { createFx } from './fx.js';
 import { sendNtfy, sendEmail } from './notify.js';
 
+// Sources in the user's productivity order (config.watchSourceOrder), so a
+// multi-hour run front-loads the sources that actually produce listings.
+// Names not in the order list keep their registry order, after the listed
+// ones. Exported for tests.
+export function orderSources(sources, priority = config.watchSourceOrder) {
+  const rank = new Map(priority.map((name, i) => [name, i]));
+  return [...sources].sort(
+    (a, b) => (rank.get(a.name) ?? priority.length) - (rank.get(b.name) ?? priority.length)
+  );
+}
+
+// Minutes-of-day until the next occurrence of one of `times` ("HH:MM",
+// 24h) in the IANA zone `tz`, computed against the CURRENT wall clock in
+// that zone — so DST shifts are absorbed each time we re-arm. Exported for
+// tests via the `now` override.
+export function nextFireDelayMs(times, tz, now = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(now).map((p) => [p.type, p.value])
+  );
+  // Intl renders midnight as "24" in some ICU versions; normalize.
+  const nowMin = (Number(parts.hour) % 24) * 60 + Number(parts.minute);
+  const targets = times
+    .map((t) => {
+      const [h, m] = String(t).split(':').map(Number);
+      return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+    })
+    .sort((a, b) => a - b);
+  const next = targets.find((t) => t > nowMin) ?? targets[0] + 24 * 60;
+  return (next - nowMin) * 60_000 - Number(parts.second) * 1000;
+}
+
 // Did a re-sighted listing's price actually go DOWN? Native currency only —
 // comparing across a currency change (or through the USD conversion) would
 // let FX drift fake a "drop" the seller never made. Sub-cent noise ignored.
@@ -44,6 +77,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
   let lastError = null;
   let donePromise = null;
   let timer = null;
+  let ebayTimer = null;
   let skippedSources = [];
   // Price drops on followed Buy It Nows, collected during the run and
   // flushed by notifyAfterRun. Kept on the runner (not per-call) so tests
@@ -155,7 +189,12 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
           company: watch.grading_company,
           grade: watch.grade,
         };
-    const queries = buildQueries(target);
+    // A user-edited search term replaces the generated queries VERBATIM (no
+    // loose fallback — an override means "send exactly this"). Scoring is
+    // untouched: results are still verified against the card's identity.
+    const queries = watch.search_term?.trim()
+      ? { tight: watch.search_term.trim(), loose: null }
+      : buildQueries(target);
     // Show the FULL card name ("1997 Metal Universe Michael Jordan Titanium
     // #1"), not year+player — the compressed form looked like a watch that
     // didn't exist ("1997 Michael Jordan" matches four different watches).
@@ -322,7 +361,10 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
     }
   }
 
-  async function start({ trigger = 'manual' } = {}) {
+  // only / exclude: source-name filters for dedicated runs — the fixed-time
+  // eBay schedule runs start({ only: ['ebay'] }) while the interval runs
+  // exclude it, so quota spend is exactly runs/day × watches × marketplaces.
+  async function start({ trigger = 'manual', only = null, exclude = null } = {}) {
     if (running) throw Object.assign(new Error('watch check already running'), { code: 409 });
     const watches = q.listEnabledWatches.all();
     if (watches.length === 0) {
@@ -334,13 +376,18 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
     }
     // A source missing its setup (e.g. eBay without API keys) is skipped
     // with a reason instead of failing every watch against it.
-    const sources = [];
+    let sources = [];
     skippedSources = [];
     for (const s of allSources) {
+      if (only && !only.includes(s.name)) continue;
+      if (exclude && exclude.includes(s.name)) continue;
       const reason = s.configured?.() ?? null;
       if (reason) skippedSources.push({ name: s.name, reason });
       else sources.push(s);
     }
+    // Most-productive sources first (config.watchSourceOrder) so a long run
+    // surfaces new listings early instead of after the thin auction houses.
+    sources = orderSources(sources);
     if (sources.length === 0) {
       const detail = skippedSources.map((s) => `${s.name}: ${s.reason}`).join(' · ');
       throw Object.assign(
@@ -371,14 +418,12 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
           if (!bySource.has(item.source)) bySource.set(item.source, []);
           bySource.get(item.source).push(item);
         }
-        // Rotate source order per run so one slow source doesn't always
-        // starve the last.
-        const order = sources.filter((s) => bySource.has(s.name));
-        const rot = order.length ? runId % order.length : 0;
-        const rotated = [...order.slice(rot), ...order.slice(0, rot)];
-
-        for (const source of rotated) {
+        // Priority order (already applied to `sources` above) — the old
+        // per-run rotation meant a run could spend its first hours on the
+        // thinnest auction houses while eBay sat queued at the back.
+        for (const source of sources) {
           if (cancelRequested) break;
+          if (!bySource.has(source.name)) continue;
           await processSource(source, bySource.get(source.name), watchById, runId, runStartedAt);
         }
 
@@ -408,8 +453,11 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
   // setTimeout chain, not setInterval: the next tick is armed only after the
   // previous run fully finishes, so runs can never stack up.
   function startScheduler() {
+    armEbaySchedule();
     if (config.watchIntervalMin <= 0 || timer) return;
     const intervalMs = config.watchIntervalMin * 60 * 1000;
+    // With fixed eBay times configured, interval runs leave eBay to them.
+    const exclude = config.ebayCheckTimes.length > 0 ? ['ebay'] : null;
     const arm = () => {
       timer = setTimeout(tick, intervalMs);
       timer.unref?.(); // don't hold the process open just for the scheduler
@@ -417,7 +465,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
     const tick = async () => {
       try {
         if (!running && q.countEnabledWatches.get().n > 0) {
-          await start({ trigger: 'scheduled' });
+          await start({ trigger: 'scheduled', exclude });
           await donePromise;
         }
       } catch {
@@ -428,9 +476,38 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
     arm();
   }
 
+  // Dedicated ebay-only runs at the configured wall-clock times (e.g.
+  // "11:00,21:00" US Eastern). Re-armed after every firing, so the delay is
+  // always computed against the CURRENT zone offset — DST shifts absorb
+  // themselves. If a general run is in flight at fire time, wait it out; if
+  // another run then wins the race, this slot is skipped (409) and the next
+  // scheduled time takes over.
+  function armEbaySchedule() {
+    if (config.ebayCheckTimes.length === 0 || ebayTimer) return;
+    const arm = () => {
+      ebayTimer = setTimeout(fire, nextFireDelayMs(config.ebayCheckTimes, config.ebayCheckTz));
+      ebayTimer.unref?.();
+    };
+    const fire = async () => {
+      try {
+        if (running) await donePromise;
+        if (q.countEnabledWatches.get().n > 0) {
+          await start({ trigger: 'scheduled', only: ['ebay'] });
+          await donePromise;
+        }
+      } catch {
+        // 409 lost-race / config errors: surfaced via lastError
+      }
+      arm();
+    };
+    arm();
+  }
+
   function stopScheduler() {
     if (timer) clearTimeout(timer);
     timer = null;
+    if (ebayTimer) clearTimeout(ebayTimer);
+    ebayTimer = null;
   }
 
   // whenDone: test/scheduler hook to await the in-flight run.

@@ -80,6 +80,21 @@ export const config = {
   // 'all' = every adapter in the source registry (the default). Sources
   // missing setup are skipped with a reason, so this is safe.
   watchSources: listEnv('WATCH_SOURCES', 'all'),
+  // Checks work through sources in this order — most productive first, so
+  // new listings appear early in a multi-hour run instead of after the
+  // thin auction houses. Unlisted sources run after these, registry order.
+  watchSourceOrder: listEnv(
+    'WATCH_SOURCE_ORDER',
+    'ebay,fanatics,comc,heritage,goldin,cia,pristine,alt,hibid'
+  ),
+  // Fixed-time eBay runs, e.g. "11:00,21:00" (24h clock in EBAY_CHECK_TZ,
+  // default US Eastern — DST-aware). When set, the interval scheduler skips
+  // eBay and these dedicated ebay-only runs handle it, making API-quota
+  // spend predictable: runs/day × watches × marketplaces. Manual "Check
+  // now" still includes eBay — pressing the button is an explicit ask.
+  // Empty = eBay joins every check like any other source.
+  ebayCheckTimes: listEnv('EBAY_CHECK_TIMES', ''),
+  ebayCheckTz: process.env.EBAY_CHECK_TZ || 'America/New_York',
   ebayClientId: process.env.EBAY_CLIENT_ID || '',
   ebayClientSecret: process.env.EBAY_CLIENT_SECRET || '',
   ebayEnv: process.env.EBAY_ENV || 'production',

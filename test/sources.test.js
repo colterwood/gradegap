@@ -739,3 +739,31 @@ test('fetchWithTimeout: a timeout reports itself as one, never a bare abort', as
     srv.close();
   }
 });
+
+test('alt: slab-less titles get grader+grade folded in from metadata', async () => {
+  const { mapAltListing } = await import('../src/marketplace/sources/alt.js');
+  // Alt's real shape: grade in fields, not in the title (why 279 watches
+  // produced zero Alt matches — the slab gate never saw a grade).
+  const folded = mapAltListing({
+    id: 'ast_9',
+    name: '1986 Fleer Michael Jordan #57',
+    gradingCompany: 'BGS',
+    grade: 9,
+    lowestAsk: 250000,
+  });
+  assert.equal(folded.title, '1986 Fleer Michael Jordan #57 BGS 9');
+
+  // A title that already names a slab is left alone.
+  const already = mapAltListing({
+    id: 'ast_10',
+    name: '1986 Fleer Michael Jordan #57 PSA 8',
+    gradingCompany: 'PSA',
+    grade: 8,
+    lowestAsk: 100000,
+  });
+  assert.equal(already.title, '1986 Fleer Michael Jordan #57 PSA 8');
+
+  // No metadata -> unchanged (and still a valid listing via price).
+  const bare = mapAltListing({ id: 'ast_11', name: '1986 Fleer Michael Jordan #57', lowestAsk: 5000 });
+  assert.equal(bare.title, '1986 Fleer Michael Jordan #57');
+});

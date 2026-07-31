@@ -6,6 +6,25 @@ import {
   MANUAL_GRADERS,
   MANUAL_GRADES,
 } from '../config.js';
+import { buildQueries } from '../marketplace/match.js';
+
+// The automatic search query for a watch row — same construction the
+// runner uses, so the Watched tab's Search-term placeholder shows exactly
+// what a check would send when no override is set.
+function autoSearch(w) {
+  const target = w.description
+    ? { description: w.description, company: w.grading_company, grade: w.grade }
+    : {
+        playerName: w.player_name ?? w.card_name,
+        year: w.year,
+        setName: w.set_name,
+        cardNumber: w.card_number,
+        parallel: w.parallel,
+        company: w.grading_company,
+        grade: w.grade,
+      };
+  return buildQueries(target).tight;
+}
 
 // Watch + matches routes, mounted at /api beside makeApiRouter. Same rules:
 // all SQL lives in queries.js, 409 means "already running".
@@ -55,18 +74,23 @@ export function makeWatchRouter(db, q, watchRunner) {
   });
 
   router.get('/watches', (_req, res) => {
-    res.json(q.listWatches.all());
+    res.json(q.listWatches.all().map((w) => ({ ...w, auto_search: autoSearch(w) })));
   });
 
   router.patch('/watches/:id', (req, res) => {
     const id = Number(req.params.id);
     const watch = q.getWatch.get(id);
     if (!watch) return res.status(404).json({ ok: false, error: 'no such watch' });
-    const { enabled, maxPrice } = req.body ?? {};
+    const { enabled, maxPrice, searchTerm } = req.body ?? {};
     if (enabled !== undefined) q.setWatchEnabled.run(enabled ? 1 : 0, id);
     if (maxPrice !== undefined) {
       const price = maxPrice == null || maxPrice === '' ? null : Math.max(0, parseFloat(maxPrice) || 0) || null;
       q.setWatchMaxPrice.run(price, id);
+    }
+    // Blank/whitespace clears the override back to the automatic query.
+    if (searchTerm !== undefined) {
+      const term = searchTerm == null ? null : String(searchTerm).trim().replace(/\s+/g, ' ') || null;
+      q.setWatchSearchTerm.run(term, id);
     }
     res.json({ ok: true, watch: q.getWatch.get(id) });
   });

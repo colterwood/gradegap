@@ -21,6 +21,21 @@ const tokenize = (s) =>
     .split(' ')
     .filter(Boolean);
 
+// Card Ladder writes player aliases in parentheses: "Kareem Abdul-Jabbar
+// (Lew Alcindor)", "(Shoeless) Joe Jackson". The parenthetical is an ALIAS,
+// and treating it as part of the name broke Kareem end to end (live-
+// verified): queries carried "(Lew Alcindor)" so eBay's AND-semantics
+// returned zero listings, and the scorer's required surname became
+// "alcindor", hard-dropping every Jabbar-titled listing that did arrive.
+// Split into the primary name plus alias phrases; queries use the primary,
+// the player gate accepts either.
+export function splitAliases(name) {
+  const raw = String(name ?? '');
+  const aliases = [...raw.matchAll(/\(([^)]+)\)/g)].map((m) => m[1].trim()).filter(Boolean);
+  const primary = raw.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  return { primary: primary || raw.trim(), aliases };
+}
+
 // --- query building --------------------------------------------------------
 
 // Search strings for a watch. `tight` leans on the full card identity;
@@ -44,8 +59,11 @@ export function buildQueries(target) {
     return { tight, loose: tight === description ? null : description };
   }
 
-  const tight = [year, setName, playerName, parallel, slab].filter(Boolean).join(' ').trim();
-  const loose = [year, playerName, cardNumber ? `#${cardNumber}` : null, slab]
+  // Queries carry only the PRIMARY player name — an alias in the query
+  // ANDs against listing titles and silently zeroes the results.
+  const player = splitAliases(playerName).primary;
+  const tight = [year, setName, player, parallel, slab].filter(Boolean).join(' ').trim();
+  const loose = [year, player, cardNumber ? `#${cardNumber}` : null, slab]
     .filter(Boolean)
     .join(' ')
     .trim();
@@ -153,6 +171,10 @@ const VARIANT_WORDS = [
   'refractor', 'refractors', 'xfractor', 'foil', 'prizm', 'holo', 'atomic',
   'sapphire', 'shimmer', 'wave', 'mojo', 'sparkle', 'cracked', 'ice',
   'gold', 'silver', 'sepia', 'camo', 'vs',
+  // 1986 Fleer #1 Kareem exists as base AND Sticker — a base watch must not
+  // score a Sticker listing at 100% (the Sticker watch names its parallel,
+  // so it stays exempt via its own identity tokens).
+  'sticker', 'stickers',
 ];
 
 const variantWords = (titleTokens, targetTokens) =>
@@ -204,11 +226,15 @@ export function scoreListing(target, title) {
     if (yearRegex(target.year).test(raw)) matched.push(`year:${target.year}`);
     else missing.push(`year:${target.year}`);
   }
-  const nameTokens = tokenize(target.playerName ?? '');
+  const { primary, aliases } = splitAliases(target.playerName ?? '');
+  const nameTokens = tokenize(primary);
   const lastName = nameTokens[nameTokens.length - 1];
   if (lastName) {
-    if (tokens.has(lastName)) matched.push(`player:${lastName}`);
-    else missing.push(`player:${lastName}`);
+    // The title may use either identity: "Abdul-Jabbar" or "Lew Alcindor".
+    const surnames = [lastName, ...aliases.map((a) => tokenize(a).pop()).filter(Boolean)];
+    const hit = surnames.find((s) => tokens.has(s));
+    if (hit) matched.push(`player:${hit}`);
+    else missing.push(`player:${surnames.join('|')}`);
   }
   // Set name is a hard requirement too (when the card has one): at least one
   // significant set token must appear, or "1997 Kobe SGC 9" matches every

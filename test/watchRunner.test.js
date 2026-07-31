@@ -12,7 +12,7 @@ process.env.EMAIL_TO = '';
 const { openDb } = await import('../src/db/db.js');
 const { makeQueries } = await import('../src/db/queries.js');
 const { createSyncManager } = await import('../src/sync/syncRunner.js');
-const { createWatchRunner, priceDropped } = await import('../src/marketplace/watchRunner.js');
+const { createWatchRunner, priceDropped, orderSources, nextFireDelayMs } = await import('../src/marketplace/watchRunner.js');
 const { sendEmail, emailConfigured } = await import('../src/marketplace/notify.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -234,6 +234,58 @@ test('a followed Buy It Now re-sighted cheaper is flagged as a price drop', asyn
   await runner.start({});
   await waitUntilDone(runner);
   assert.equal(runner.status().priceDrops.length, 0);
+});
+
+test('a custom search term replaces the generated queries verbatim', async () => {
+  const { q, runner, watch } = await freshWatched();
+
+  // Nonsense override: shares <2 tokens with every fixture title, so the
+  // mock market returns nothing — and with an override there is no loose
+  // fallback, so the watch genuinely finds zero.
+  q.setWatchSearchTerm.run('zzz qqq', watch.id);
+  await runner.start({});
+  await waitUntilDone(runner);
+  assert.equal(q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null }).length, 0);
+
+  // A sensible override finds listings — and the match layer still gates:
+  // the PSA vault copy and the Larry Bird fixture never get stored for this
+  // SGC 10 watch, whatever the query said.
+  q.setWatchSearchTerm.run('1986 Fleer Jordan', watch.id);
+  await runner.start({});
+  await waitUntilDone(runner);
+  const rows = q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null });
+  assert.ok(rows.length > 0, 'override query found listings');
+  assert.ok(!rows.some((l) => l.listing_id === 'mkt-psa-side' || l.listing_id === 'mkt-other-player'));
+
+  // Clearing the override restores the automatic queries.
+  q.setWatchSearchTerm.run(null, watch.id);
+  await runner.start({});
+  await waitUntilDone(runner);
+  assert.ok(
+    q.listMatches.all({ watchId: watch.id, statuses: '|new|notified|', limit: 50, followed: null }).length >= rows.length
+  );
+});
+
+test('orderSources: priority names first, stragglers keep registry order', () => {
+  const s = (name) => ({ name });
+  const input = ['miller', 'alt', 'woocommerce', 'ebay', 'shopify', 'fanatics', 'comc'].map(s);
+  const out = orderSources(input, ['ebay', 'fanatics', 'comc', 'alt']);
+  assert.deepEqual(out.map((x) => x.name), ['ebay', 'fanatics', 'comc', 'alt', 'miller', 'woocommerce', 'shopify']);
+  // Input array is not mutated (sources are shared state on the runner).
+  assert.equal(input[0].name, 'miller');
+});
+
+test('nextFireDelayMs: soonest of the configured times, rolling over midnight', () => {
+  // Deterministic zone: UTC. 10:00 -> 11:00 fire = 60 min out.
+  const at = (h, m) => new Date(Date.UTC(2026, 6, 31, h, m, 0));
+  const times = ['11:00', '21:00'];
+  assert.equal(nextFireDelayMs(times, 'UTC', at(10, 0)), 60 * 60_000);
+  // 11:00 exactly -> the 11:00 slot is past; next is 21:00.
+  assert.equal(nextFireDelayMs(times, 'UTC', at(11, 0)), 10 * 60 * 60_000);
+  // 22:30 -> rolls over to tomorrow's 11:00.
+  assert.equal(nextFireDelayMs(times, 'UTC', at(22, 30)), 12.5 * 60 * 60_000);
+  // Zone-awareness: 14:00 UTC in July = 10:00 in New York (EDT) -> 60 min to 11:00.
+  assert.equal(nextFireDelayMs(['11:00'], 'America/New_York', at(14, 0)), 60 * 60_000);
 });
 
 test('email: unconfigured send is a clean false, never a throw', async () => {

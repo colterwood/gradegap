@@ -20,6 +20,7 @@ export function openDb(dbPath = path.join(config.dataDir, 'gradegap.db')) {
   ensureColumn(db, 'grade_prices', 'num_sales', 'INTEGER');
   ensureColumn(db, 'listings', 'followed', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'listings', 'follow_reminder_sent', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'watches', 'search_term', 'TEXT');
   purgeDismissedAndEndedListings(db);
   db.pragma('foreign_keys = ON');
   return db;

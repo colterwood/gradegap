@@ -95,10 +95,21 @@ export function mapAltListing(o) {
   if (!o || typeof o !== 'object') return null;
   if (!isAltsOwnListing(o)) return null;
   const id = o.id ?? o.listingId ?? o.assetId ?? o.uuid ?? o.slug;
-  const title =
+  let title =
     o.title ?? o.name ?? o.cardName ?? o.card_name ?? o.displayName ?? o.description ?? null;
   if (id == null || typeof title !== 'string' || title.length < 8) return null;
   if (!CARD_TITLE_RE.test(title)) return null;
+
+  // Alt is a graded-card exchange whose titles routinely OMIT the slab
+  // ("1986 Fleer Michael Jordan #57") — the grade lives in metadata fields.
+  // The match layer's hard slab gate only sees the title, so every such
+  // listing was silently dropped (279 watches, zero Alt matches,
+  // live-observed 2026-07-31). Fold grader+grade into the scored title.
+  const grader = [o.gradingCompany, o.grading_company, o.grader].find((v) => typeof v === 'string' && v.trim());
+  const grade = ['string', 'number'].includes(typeof o.grade) && String(o.grade).trim() !== '' ? o.grade : null;
+  if (grader && grade != null && !/\b(psa|bgs|sgc|cgc|csg)\b/i.test(title)) {
+    title = `${title} ${grader} ${grade}`;
+  }
 
   let price = null;
   for (const k of PRICE_KEYS) {

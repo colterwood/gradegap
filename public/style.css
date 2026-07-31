@@ -198,6 +198,18 @@ td.watch-cell input { cursor: pointer; }
 
 #watches-table { margin-bottom: 24px; }
 #watches-table input[type="number"] { min-width: 90px; width: 90px; padding: 4px 8px; }
+#watches-table input.watch-search-term {
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+  min-width: 240px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+}
+#watches-table input.watch-search-term::placeholder { color: var(--muted); font-style: italic; }
 
 /* hand-add a watch */
 .add-watch {

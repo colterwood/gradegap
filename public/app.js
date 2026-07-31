@@ -585,6 +585,9 @@ function renderWatches(watches) {
     tr.innerHTML = `
       <td>${esc(w.card_name)}${w.card_id == null ? ' <span class="manual-tag">manual</span>' : ''}</td>
       <td class="grade-cell">${esc(slabLabel(w))}</td>
+      <td><input type="text" class="watch-search-term" data-id="${w.id}"
+        value="${esc(w.search_term ?? '')}" placeholder="${esc(w.auto_search ?? '')}"
+        title="Sent to marketplaces verbatim when set; blank = the automatic query shown in gray" /></td>
       <td class="num"><input type="number" class="watch-max-price" data-id="${w.id}" min="0" step="50"
         value="${w.max_price ?? ''}" placeholder="—" /></td>
       <td class="num">${w.active_listings}</td>
@@ -821,6 +824,7 @@ for (const [viewKey, tableId] of [['listings', 'matches-table'], ['following', '
 document.querySelector('#watches-table tbody').addEventListener('change', async (e) => {
   const enabled = e.target.closest('input.watch-enabled');
   const maxPrice = e.target.closest('input.watch-max-price');
+  const searchTerm = e.target.closest('input.watch-search-term');
   try {
     if (enabled) {
       await api(`/api/watches/${enabled.dataset.id}`, {
@@ -833,6 +837,14 @@ document.querySelector('#watches-table tbody').addEventListener('change', async 
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ maxPrice: maxPrice.value === '' ? null : parseFloat(maxPrice.value) }),
+      });
+    } else if (searchTerm) {
+      // Blank clears the override — the placeholder (automatic query) takes
+      // back over on the next check.
+      await api(`/api/watches/${searchTerm.dataset.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ searchTerm: searchTerm.value }),
       });
     }
   } catch (err) {

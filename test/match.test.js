@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildQueries,
   scoreListing,
+  splitAliases,
   yearRegex,
   slabRegex,
   slabMatcher,
@@ -163,6 +164,66 @@ test('parallel tokens count when the watch has one', () => {
   const withPar = scoreListing(silver, '2018-19 Panini Prizm Silver Luka Doncic #280 PSA 10');
   const withoutPar = scoreListing(silver, '2018-19 Panini Prizm Luka Doncic #280 PSA 10');
   assert.ok(withPar.score > withoutPar.score);
+});
+
+// --- parenthetical aliases (the live Kareem miss) ---------------------------
+
+const kareem = {
+  playerName: 'Kareem Abdul-Jabbar (Lew Alcindor)',
+  year: 1986,
+  setName: 'Fleer',
+  cardNumber: '1',
+  parallel: null,
+  company: 'BGS',
+  grade: '9',
+};
+
+test('splitAliases: parentheticals become aliases, wherever they sit', () => {
+  assert.deepEqual(splitAliases('Kareem Abdul-Jabbar (Lew Alcindor)'), {
+    primary: 'Kareem Abdul-Jabbar',
+    aliases: ['Lew Alcindor'],
+  });
+  assert.deepEqual(splitAliases('(Shoeless) Joe Jackson'), {
+    primary: 'Joe Jackson',
+    aliases: ['Shoeless'],
+  });
+  assert.deepEqual(splitAliases('Michael Jordan'), { primary: 'Michael Jordan', aliases: [] });
+});
+
+test('queries carry the primary name only — an alias in the query zeroes eBay results', () => {
+  // Live-verified 2026-07-31: the query WITH "(Lew Alcindor)" returned 0
+  // listings; without it, the exact card the user found by hand came back.
+  const q = buildQueries(kareem);
+  assert.equal(q.tight, '1986 Fleer Kareem Abdul-Jabbar BGS 9');
+  assert.equal(q.loose, '1986 Kareem Abdul-Jabbar #1 BGS 9');
+});
+
+test('player gate accepts the primary surname OR an alias surname', () => {
+  // The real listing the old gate hard-dropped (required "alcindor"):
+  const jabbar = scoreListing(kareem, '1986-87 Fleer - Kareem Abdul-Jabbar #1 BGS 9 True 9');
+  assert.equal(jabbar.ok, true);
+  assert.ok(jabbar.score >= 0.8, `score ${jabbar.score}`);
+
+  // A vintage-style title using the alias identity still matches.
+  const alcindor = scoreListing(kareem, '1986 Fleer Lew Alcindor #1 BGS 9');
+  assert.equal(alcindor.ok, true);
+
+  // Neither identity present -> still a hard drop.
+  assert.equal(scoreListing(kareem, '1986 Fleer Magic Johnson #53 BGS 9').ok, false);
+});
+
+test('a base watch does not score the Sticker parallel at 100%', () => {
+  // 1986 Fleer #1 Kareem exists as base AND Sticker; the user watches both.
+  const sticker = scoreListing(kareem, '1986 Fleer Sticker Basketball #1 Kareem Abdul-Jabbar BGS 9');
+  assert.equal(sticker.ok, true);
+  assert.ok(sticker.score <= 0.7, `score ${sticker.score}`);
+  assert.ok(sticker.debug.penalties.includes('variant:sticker'));
+
+  // The Sticker watch itself names the parallel -> exempt, full marks.
+  const stickerWatch = { ...kareem, parallel: 'Sticker' };
+  const exact = scoreListing(stickerWatch, '1986 Fleer Sticker Basketball #1 Kareem Abdul-Jabbar BGS 9');
+  assert.ok(exact.debug.penalties.length === 0);
+  assert.ok(exact.score >= 0.9, `score ${exact.score}`);
 });
 
 // --- manual watches (hand-added on the Watched tab) ------------------------
