@@ -116,8 +116,11 @@ export function yearRegex(year) {
   // The lookbehind stops the bare year matching as the TAIL of a full season
   // range: "2017-2018 Prizm" is a 2017 card, so it must not satisfy a 2018
   // watch (the second year of a range was live-verified to leak through).
+  // It requires a FULL four-digit year before the dash — a looser "any
+  // digits" form also rejected auction-house lot prefixes like
+  // "Lot 003 - 1951 Bowman", hard-failing every CIA lot on the year gate.
   return new RegExp(
-    `(?<!\\d\\s*[-/]\\s*)\\b${y}(?:\\s*[-/]\\s*(?:${nextYy}|${y.slice(0, 2)}${nextYy}))?\\b` +
+    `(?<!\\d{4}\\s?[-/]\\s?)\\b${y}(?:\\s*[-/]\\s*(?:${nextYy}|${y.slice(0, 2)}${nextYy}))?\\b` +
       `|\\b${yy}\\s*[-/]\\s*${nextYy}\\b`,
     'i'
   );

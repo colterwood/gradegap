@@ -348,9 +348,21 @@ export function makeQueries(db) {
     // A re-sighting refreshes the live fields and resets the staleness
     // counter. url is refreshed too, so rows stored before an adapter's
     // link format was corrected get repaired on the next check.
+    //
+    // listing_type is refreshed as well: it used to be written only at
+    // insert, so a wrong first classification was permanent — and both
+    // cleanup passes plus the ending-soon alerts key on it. When a row is
+    // (re)confirmed 'fixed' its end date is CLEARED rather than COALESCEd,
+    // since a leftover auction date on a fixed row would eventually trip
+    // deleteEndedAuctions against a listing that is still for sale. On the
+    // auction branch COALESCE stays, so an adapter that intermittently
+    // omits endsAt doesn't erase a good one.
     refreshListing: db.prepare(`
       UPDATE listings SET title = @title, price = @price, currency = @currency, price_usd = @priceUsd,
-        ends_at = COALESCE(@endsAt, ends_at), url = COALESCE(@url, url),
+        listing_type = COALESCE(@listingType, listing_type),
+        ends_at = CASE WHEN COALESCE(@listingType, listing_type) = 'fixed'
+                       THEN NULL ELSE COALESCE(@endsAt, ends_at) END,
+        url = COALESCE(@url, url),
         misses = 0, last_seen_at = datetime('now')
       WHERE id = @id
     `),
@@ -406,10 +418,14 @@ export function makeQueries(db) {
     // is left alone; it gets deleted the moment that date passes.
     // A successful (watch, source) check that didn't see the listing bumps
     // its miss counter; 3 consecutive misses = confidently gone.
+    // listing_type IS NULL is included so an untyped row (older rows, or an
+    // adapter that omits the field) still ages out — it matches neither
+    // this clause's 'fixed' test nor deleteEndedAuctions' 'auction' one,
+    // and would otherwise be immortal.
     bumpListingMisses: db.prepare(`
       UPDATE listings SET misses = misses + 1
       WHERE watch_id = @watchId AND source = @source
-        AND (listing_type = 'fixed' OR ends_at IS NULL)
+        AND (listing_type IS NULL OR listing_type = 'fixed' OR ends_at IS NULL)
         AND status IN ('new','notified') AND last_seen_at < @runStartedAt
     `),
     deleteStaleListings: db.prepare(`

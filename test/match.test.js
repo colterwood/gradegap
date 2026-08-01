@@ -453,10 +453,17 @@ test('generational suffixes: the required surname skips Jr./II', () => {
 test('yearRegex: the second year of a full season range is not this year', () => {
   assert.ok(!yearRegex(2018).test('2017-2018 Panini Prizm Luka'));
   assert.ok(!yearRegex(1987).test('1986-1987 Fleer Jordan'));
+  assert.ok(!yearRegex(1987).test('1986 - 1987 Fleer Jordan')); // spaced range too
   // The first year of the range still is, in every format.
   assert.ok(yearRegex(2017).test('2017-2018 Panini Prizm Luka'));
   assert.ok(yearRegex(1986).test('1986-1987 Fleer Jordan'));
   assert.ok(yearRegex(1986).test('1986-87 Fleer Jordan'));
+  // An auction-house lot prefix is NOT a season range: requiring a full
+  // four-digit year before the dash keeps "Lot 003 - 1951 Bowman" matching
+  // (a looser guard hard-failed every CIA lot on the year gate).
+  assert.ok(yearRegex(1951).test('Lot 003 - 1951 Bowman #253 Mickey Mantle'));
+  assert.ok(yearRegex(1952).test('Lot 1 - 1952 Topps #311 Mantle'));
+  assert.ok(yearRegex(1986).test('#57 - 1986 Fleer Jordan'));
 });
 
 test('manual watch: a single-digit card number is required, not dropped', () => {

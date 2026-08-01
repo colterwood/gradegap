@@ -11,7 +11,7 @@
 import { config } from '../config.js';
 import { buildQueries, buildWatchTarget, scoreListing } from './match.js';
 import { createMarketplaceSources } from './sources/index.js';
-import { withTimeout } from './sources/util.js';
+import { withTimeout, toIsoDate } from './sources/util.js';
 import { createFx } from './fx.js';
 import { sendNtfy, sendEmail } from './notify.js';
 
@@ -85,10 +85,14 @@ const jitter = () => 200 + Math.floor(Math.random() * 600);
 // Normalize any incoming end date to SQLite's "YYYY-MM-DD HH:MM:SS" (UTC) so
 // comparisons against datetime('now') are consistent (ISO 'T' strings don't
 // collate correctly against SQLite's space-separated format).
+//
+// Everything goes through toIsoDate first: `new Date()` alone reads a bare
+// number as MILLISECONDS (epoch seconds would land in 1970) and a zone-less
+// string as SERVER-LOCAL time (hours off, differently on every machine).
 function toSqlDate(raw) {
   if (!raw) return null;
-  const d = new Date(raw);
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 19).replace('T', ' ');
+  const iso = toIsoDate(raw);
+  return iso == null ? null : iso.slice(0, 19).replace('T', ' ');
 }
 
 // sourcesFactory: test seam — production always uses the real registry.
@@ -166,6 +170,12 @@ export function createWatchRunner(db, q, { syncManager, sourcesFactory = createM
         q.getListingByKey.get(sourceName, String(raw.listingId)) ??
         (canonicalKey ? q.getListingByCanonical.get(canonicalKey) : undefined);
       const priceUsd = fx.toUsd(raw.price, raw.currency);
+      // Normalized ONCE: the already-ended guard below used to read the raw
+      // value while storage normalized it separately, so an epoch-seconds
+      // end date passed the guard (Date.parse -> NaN) and then stored as
+      // 1970 — inserted, deleted by the post-run sweep, re-inserted next
+      // run, inflating new_listings every cycle.
+      const endsAtIso = toIsoDate(raw.endsAt);
       if (existing) {
         // Followed Buy It Now re-sighted at a lower native price -> alert
         // material. Captured BEFORE the refresh overwrites the old price.
@@ -196,7 +206,12 @@ export function createWatchRunner(db, q, { syncManager, sourcesFactory = createM
           price: raw.price ?? null,
           currency: raw.currency ?? 'USD',
           priceUsd,
-          endsAt: toSqlDate(raw.endsAt),
+          // listing_type was written only at insert, so a wrong first guess
+          // (or a lot that genuinely flips format) was permanent — and a
+          // 'fixed' row could keep a stale end date that later armed a
+          // bogus delete. Both are corrected on every re-sighting now.
+          listingType: raw.listingType ?? null,
+          endsAt: toSqlDate(endsAtIso),
           url: raw.url ?? null,
         });
       } else {
@@ -212,7 +227,7 @@ export function createWatchRunner(db, q, { syncManager, sourcesFactory = createM
         // surfacing for the first time after it's over. Skip it outright
         // instead of inserting it only for the post-run pass to delete it
         // right back out.
-        const endsAtMs = raw.listingType === 'auction' && raw.endsAt ? Date.parse(raw.endsAt) : NaN;
+        const endsAtMs = raw.listingType === 'auction' && endsAtIso ? Date.parse(endsAtIso) : NaN;
         if (!Number.isNaN(endsAtMs) && endsAtMs < Date.now()) continue;
         if (watch.max_price != null && priceUsd != null && priceUsd > watch.max_price) continue;
         q.insertListing.run({
@@ -225,8 +240,10 @@ export function createWatchRunner(db, q, { syncManager, sourcesFactory = createM
           price: raw.price ?? null,
           currency: raw.currency ?? 'USD',
           priceUsd,
-          listingType: raw.listingType ?? null,
-          endsAt: toSqlDate(raw.endsAt),
+          // Never NULL: both cleanup passes key on the type, and a NULL
+          // row matches neither, so it would live forever.
+          listingType: raw.listingType ?? 'fixed',
+          endsAt: toSqlDate(endsAtIso),
           imageUrl: raw.imageUrl ?? null,
           seller: raw.seller ?? null,
           matchScore: score.score,
@@ -520,7 +537,14 @@ export function createWatchRunner(db, q, { syncManager, sourcesFactory = createM
         const tabCount = Math.max(1, Math.min(config.watchBrowserConcurrency, browserQueue.length));
         const browserLane = async () => {
           while (browserQueue.length > 0 && !cancelRequested) {
-            await runSource(browserQueue.shift());
+            const source = browserQueue.shift();
+            // Per-source try/catch: one browser source crashing outright
+            // must not strand the rest of the queue behind it.
+            try {
+              await runSource(source);
+            } catch (err) {
+              lastError = String(err?.message ?? err);
+            }
           }
         };
         // allSettled so one source's unexpected crash can't strand the others
@@ -530,11 +554,15 @@ export function createWatchRunner(db, q, { syncManager, sourcesFactory = createM
           ...Array.from({ length: tabCount }, () => browserLane()),
         ]);
         const crashed = settled.find((r) => r.status === 'rejected');
-        if (crashed) throw crashed.reason;
 
+        // Housekeeping runs BEFORE the rethrow: it has nothing to do with
+        // the crashed source, and skipping it meant one bad source delayed
+        // every ending-soon alert by a full cycle and left finished
+        // auctions on the board.
         q.deleteEndedAuctions.run();
         q.deleteStaleListings.run();
         await notifyAfterRun();
+        if (crashed) throw crashed.reason;
 
         q.finishWatchRun.run({ id: runId, status: cancelRequested ? 'cancelled' : 'completed', error: null });
         // Nothing reads history past the latest runs; stop it growing forever

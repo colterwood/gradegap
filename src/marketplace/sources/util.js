@@ -79,9 +79,56 @@ export const toIsoDate = (v) => {
   const s = String(v).trim();
   if (!s) return null;
   if (/^\d+$/.test(s)) return toIsoDate(Number(s)); // epoch as a string
-  const d = new Date(s);
+  // A date-TIME with no zone is parsed as the SERVER's local time by spec,
+  // which makes the stored value depend on the machine rather than the
+  // marketplace. Read it as UTC so it is at least deterministic — an
+  // adapter that KNOWS the site's zone should call zonedToIso instead.
+  const naive = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s);
+  const d = new Date(naive ? `${s.replace(' ', 'T')}Z` : s);
   return isNaN(d.getTime()) ? null : d.toISOString();
 };
+
+// A zone-less timestamp ("2026-08-16T21:00:00", "08/16/2026 21:00:00") is
+// NOT a UTC instant — JS parses it as the SERVER's local time, so the same
+// scrape produces a different stored end date on every machine. Sites that
+// render times without an offset always mean their own zone (AuctionWorx
+// prints `timeZoneLabel = 'ET'` next to them), so adapters resolve them
+// against that zone explicitly. Returns an ISO instant, or null.
+//
+// Two passes: the first guesses the offset by reading the naive time as
+// UTC, the second re-reads it at that offset — which lands correctly on
+// either side of a DST boundary, where the offset depends on the answer.
+function zoneOffsetAt(instant, timeZone) {
+  const name = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
+    .formatToParts(instant)
+    .find((p) => p.type === 'timeZoneName')?.value ?? '';
+  // "GMT-4" / "GMT-04:00" / "GMT" (UTC itself renders bare).
+  const m = name.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+  if (!m) return '+00:00';
+  return `${m[1]}${m[2].padStart(2, '0')}:${m[3] ?? '00'}`;
+}
+
+export function zonedToIso(naive, timeZone) {
+  if (!naive) return null;
+  // Accept "YYYY-MM-DD HH:MM[:SS]" and US "M/D/YYYY H:MM[:SS]".
+  const s = String(naive).trim();
+  let iso = null;
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  const sortable = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (us) {
+    const [, mo, d, y, h, mi, se = '00'] = us;
+    iso = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}T${h.padStart(2, '0')}:${mi}:${se}`;
+  } else if (sortable) {
+    const [, y, mo, d, h, mi, se = '00'] = sortable;
+    iso = `${y}-${mo}-${d}T${h.padStart(2, '0')}:${mi}:${se}`;
+  } else {
+    return toIsoDate(s); // already carries a zone (or is an epoch) — shared path
+  }
+  let off = zoneOffsetAt(new Date(`${iso}Z`), timeZone);
+  off = zoneOffsetAt(new Date(`${iso}${off}`), timeZone);
+  const dt = new Date(`${iso}${off}`);
+  return isNaN(dt.getTime()) ? null : dt.toISOString();
+}
 
 export const centsToDollars = (c) => (c == null ? null : Math.round(Number(c)) / 100);
 

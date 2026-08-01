@@ -88,26 +88,76 @@ test('hibid: maps lots, prefers highBid, drops closed, carries house currency', 
   assert.equal(out[0].url, 'https://hibid.com/lot/111/1979-opc-wayne-gretzky-rc-psa-5');
 });
 
-test('cia: parses AuctionWorx browse sections', () => {
-  const html = `
-    <section data-listingid="4696386" class="listing">
-      <div class="panel listing">
-        <h1 class="title"><a href="/Event/LotDetails/4696386/1996-skybox-kobe">Lot 42 - 1996 Skybox Kobe Bryant PSA 8</a></h1>
-        <span class="awe-rt-CurrentPrice price">$1,225.00</span>
-        <span data-epoch="ending" data-action-time="2026-08-10T21:30:00"></span>
-        <img src="/images/lots/4696386.jpg" />
+// Verbatim structure from a live CIA /Browse page (2026-08-01): the
+// heading is an h2 whose class is "title inlinebidding" (with a sibling
+// "subtitle" heading), the thumbnail anchor comes BEFORE the title anchor,
+// the countdown spans carry data-end-*-selector attributes whose values
+// contain the literal text `data-listingid=`, and times are US-format
+// Eastern with no zone. Every one of those broke the old parser.
+const ciaLot = ({ listingId, lotId, name, price, ends, starts = '08/06/2026 12:00:00' }) => `
+<section id="LID${listingId}" data-listingid="${listingId}">
+  <div class="panel panel-default hasQuickbid clearfix listing">
+    <div class="context-wrapper" data-nosnippet>
+      <button class="addOrRemoveWatchlist" data-watch-listingid="${listingId}"></button>
+      <span class="awe-hidden awe-rt-ShowOnEnd label label-default status-type">Ended</span>
+      <span class="awe-rt-HideOnEnd label label-primary status-type InlineListingType">Auction</span>
+    </div>
+    <div class="row">
+      <div class="col-xs-4 img-container">
+        <a href="/Event/LotDetails/${lotId}/slug"><img src="https://ciaimages.blob.core.windows.net/a.jpg" class="img-responsive" /></a>
       </div>
-    </section>
-    <section data-listingid="4696387">
-      <h1 class="title"><a href="/Event/LotDetails/4696387/x">Lot 43 - 2003 Topps Chrome LeBron BGS 9.5</a></h1>
-    </section>`;
+      <div class="col-xs-8">
+        <h2 class="title inlinebidding">
+          <a href="/Event/LotDetails/${lotId}/slug">
+${name}          </a>
+        </h2>
+        <h3 class="subtitle inlinebidding"><a href="/Event/LotDetails/${lotId}/slug">BLAZER DIVISION</a></h3>
+      </div>
+    </div>
+    <div class="cta">
+      <p class="awe-rt-HideOnEnd time">
+        <span class="awe-rt-HideOnStart">Starts In
+          <span data-epoch="starting" data-end-hide-selector="[data-listingid='${listingId}'] .awe-rt-HideOnStart" data-end-show-selector="[data-listingid='${listingId}'] .awe-rt-ShowOnStart" data-action-time="${starts}"></span>
+        </span>
+        <span class="awe-hidden awe-rt-ShowOnStart">
+          <span data-epoch="ending" data-end-hide-selector="[data-listingid='${listingId}'] .awe-rt-HideOnEnd" data-end-show-selector="[data-listingid='${listingId}'] .awe-rt-ShowOnEnd" data-action-time="${ends}" data-end-value="Ended"></span>
+        </span>
+      </p>
+      <p class="bids">
+        <span class="awe-rt-HideOnEnd awe-rt-CurrentPrice price">$<span class="NumberPart">${price}</span> USD</span>
+        <a href="/Event/LotDetails/${lotId}/slug" class="awe-rt-HideOnStart btn btn-primary"><span>Preview </span></a>
+        <a href="/Event/LotDetails/${lotId}/slug" class="awe-hidden btn btn-default"><span>View Details </span></a>
+      </p>
+    </div>
+  </div>
+</section>`;
+
+test('cia: parses AuctionWorx browse sections', () => {
+  const html =
+    ciaLot({ listingId: '5593506', lotId: '5593505', name: 'Lot 001 -\n                1952 Topps #311 Mickey Mantle Hi# MBA 7', price: '1,225.00', ends: '08/16/2026 21:00:00' }) +
+    ciaLot({ listingId: '4696387', lotId: '4696386', name: 'Lot 043 - 2003 Topps Chrome LeBron BGS 9.5', price: '900.00', ends: '08/16/2026 21:00:07' });
   const out = parseAuctionWorxBrowse(html);
   assert.equal(out.length, 2);
-  assert.equal(out[0].listingId, '4696386');
+  // Identity comes from the LOT id in the URL, matching the fallback parser
+  // (AuctionWorx's section data-listingid is a different, adjacent number).
+  assert.equal(out[0].listingId, '5593505');
+  assert.match(out[0].url, /\/Event\/LotDetails\/5593505\//);
+  // The h2.title anchor wins over the thumbnail anchor (empty text) and the
+  // "Preview" CTA — the old parser stored "Preview" as every lot's title.
+  assert.equal(out[0].title, '1952 Topps #311 Mickey Mantle Hi# MBA 7');
   assert.equal(out[0].price, 1225);
-  assert.equal(out[0].endsAt, '2026-08-10T21:30:00');
-  assert.match(out[0].url, /^https:\/\/bid\.collectorinvestorauctions\.com\/Event\/LotDetails/);
-  assert.equal(out[1].price, null);
+  // 21:00 ET on Aug 16 (EDT, UTC-4) = 01:00 UTC on Aug 17 — the ENDING
+  // span, never the "starting" one, and never the machine's zone.
+  assert.equal(out[0].endsAt, '2026-08-17T01:00:00.000Z');
+  assert.equal(out[0].listingType, 'auction');
+  assert.equal(out[1].endsAt, '2026-08-17T01:00:07.000Z');
+  assert.equal(out[1].price, 900);
+});
+
+test('cia: winter lots resolve against Eastern STANDARD time', () => {
+  const html = ciaLot({ listingId: '2', lotId: '1', name: 'Lot 001 - 1986 Fleer Michael Jordan #57 PSA 8', price: '10.00', ends: '01/16/2026 21:00:00' });
+  const out = parseAuctionWorxBrowse(html);
+  assert.equal(out[0].endsAt, '2026-01-17T02:00:00.000Z'); // EST = UTC-5
 });
 
 test('classic: extracts lots from catalog anchors, dedupes both link styles', () => {
@@ -337,31 +387,46 @@ test('heritage: relative end times become ISO timestamps', () => {
 });
 
 test('cia: lot-link fallback parses skinned pages without stock blocks', () => {
+  // The countdown sits far past the anchor (it did on the live page too:
+  // 1118-3762 chars), and the STARTING span comes first — the old fixed
+  // 1200-char window never reached either, so this returned a null end.
+  const filler = '<div class="pad">' + 'x'.repeat(1500) + '</div>';
   const html = `
     <div class="custom-skin-card">
       <a href="/Event/LotDetails/4696386/1996-skybox-kobe"><img src="x.jpg"></a>
       <a href="/Event/LotDetails/4696386/1996-skybox-kobe">1996 Skybox Kobe Bryant PSA 8</a>
       <div class="bid">Current Bid: $1,225.00</div>
-      <span data-action-time="2026-08-10T21:30:00"></span>
+      ${filler}
+      <span data-epoch="starting" data-action-time="08/06/2026 12:00:00"></span>
+      <span data-epoch="ending" data-end-hide-selector="[data-listingid='4696387'] .x" data-action-time="08/16/2026 21:00:00"></span>
     </div>
     <a href="/Listing/Details/555/other">2003 Topps Chrome LeBron James BGS 9.5 rookie</a>`;
   const out = parseAuctionWorxLotLinks(html);
   assert.equal(out.length, 2);
   assert.equal(out[0].listingId, '4696386');
   assert.equal(out[0].price, 1225);
-  assert.equal(out[0].endsAt, '2026-08-10T21:30:00');
+  assert.equal(out[0].endsAt, '2026-08-17T01:00:00.000Z'); // ending, not starting
   assert.equal(out[1].listingId, '555');
 });
 
 test('cia: data-listingid on non-section elements still parses', () => {
-  const html = `<div data-listingid="777" class="row">
+  const html = `<div data-listingid="778" class="row">
     <h1 class="title"><a href="/Event/LotDetails/777/slug">Lot 7 - 1979 OPC Gretzky PSA 5</a></h1>
     <span class="awe-rt-CurrentPrice price">$900.00</span>
   </div>`;
   const out = parseAuctionWorxBrowse(html);
   assert.equal(out.length, 1);
   assert.equal(out[0].listingId, '777');
+  assert.equal(out[0].title, '1979 OPC Gretzky PSA 5'); // house lot prefix stripped
   assert.equal(out[0].price, 900);
+});
+
+test('cia: a lot whose only text anchor is a CTA button is skipped, not titled "Preview"', () => {
+  const html = `<section data-listingid="9">
+    <a href="/Event/LotDetails/9/x"><img src="i.jpg"></a>
+    <a href="/Event/LotDetails/9/x" class="btn"><span>Preview </span></a>
+  </section>`;
+  assert.deepEqual(parseAuctionWorxBrowse(html), []);
 });
 
 test('pristine: sniffed JSON payloads yield lots wherever the array hides', () => {
