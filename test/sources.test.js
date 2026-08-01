@@ -444,6 +444,8 @@ test('alt: listing objects map tolerantly; cents-scale prices normalize', async 
   // /marketplace/<id> bounced to the homepage).
   assert.match(fixed.url, /^https:\/\/alt\.xyz\/itm\/a1$/);
 
+  // endsAt here is DRIFT INSURANCE, not Alt's real field — see the
+  // live-shape test below for what Alt actually sends.
   const auction = mapAltListing({
     listingId: 'a2',
     cardName: '2003 Topps Chrome LeBron James #111 BGS 9',
@@ -487,6 +489,54 @@ test('woocommerce: HTML fallback parses product links and prices', async () => {
   assert.equal(out[0].price, 12500);
   assert.equal(out[0].listingId, 'galaxy-auctions.com:gretzky-rc-psa-5');
   assert.equal(out[1].listingId, 'galaxy-auctions.com:howe-psa-4');
+});
+
+test('alt: a real Typesense auction document keeps its end time', async () => {
+  const { mapAltListing } = await import('../src/marketplace/sources/alt.js');
+  // Verbatim field shape from a live capture (2026-08-01,
+  // production_universal_search). Alt names the close "expiresAt" — the
+  // adapter used to read endsAt/endTime/auctionEndsAt/closesAt, none of
+  // which Alt sends, so every auction stored a NULL end date: no
+  // ending-soon alert, no countdown, and never removed by the
+  // ended-auction sweep. The old fixture invented the field name, so the
+  // tests agreed with the bug.
+  const doc = {
+    id: '72f6269d-f421-416f-a70c-f7bc6a614590',
+    objectID: '72f6269d-f421-416f-a70c-f7bc6a614590',
+    listingId: '72f6269d-f421-416f-a70c-f7bc6a614590',
+    name: '1995 Skybox E-Xl Blue Michael Jordan #10',
+    itemName: '1995 Skybox E-Xl Blue Michael Jordan #10 PSA 10',
+    listingType: 'AUCTION',
+    auctionHouse: 'Alt',
+    price: 62,
+    priceCents: 6200,
+    expiresAt: '2026-08-07 01:05:00+00:00',
+    expiresAtEpoch: 1786064700,
+    startsAt: '2026-07-24 13:00:00+00:00',
+    hasAuctionEnded: false,
+    auctionCycleId: 3238,
+    gradingCompany: 'PSA',
+    grade: '10',
+    seller: 'jacksonsportscards',
+    images: [{ position: 'FRONT', url: 'https://onlyalt-images.s3.us-east-2.amazonaws.com/x.jpg' }],
+  };
+  const r = mapAltListing(doc);
+  assert.equal(r.listingType, 'auction');
+  assert.equal(r.endsAt, '2026-08-07T01:05:00.000Z');
+  assert.equal(r.price, 62);
+  assert.equal(r.seller, 'jacksonsportscards');
+  assert.match(r.title, /PSA 10$/); // slab folded in for the match layer
+  assert.equal(r.imageUrl, 'https://onlyalt-images.s3.us-east-2.amazonaws.com/x.jpg');
+
+  // The string form alone (no epoch) must land on the same instant — it
+  // carries an explicit +00:00, so it must never be read as local time.
+  const strOnly = mapAltListing({ ...doc, expiresAtEpoch: undefined });
+  assert.equal(strOnly.endsAt, '2026-08-07T01:05:00.000Z');
+
+  // A Buy It Now's expiry is a renewal date, not a deadline — not stored.
+  const buyNow = mapAltListing({ ...doc, listingType: 'BUY_NOW' });
+  assert.equal(buyNow.listingType, 'fixed');
+  assert.equal(buyNow.endsAt, null);
 });
 
 test('alt: analytics/config objects without prices are rejected', async () => {

@@ -136,7 +136,15 @@ export function mapAltListing(o) {
   const hasCardFields = CARD_FIELDS.some((k) => o[k] != null && o[k] !== '');
   if (price == null && !hasCardFields) return null;
   const isAuction = /auction/i.test(String(o.listingType ?? o.type ?? o.saleType ?? ''));
-  const ends = o.endsAt ?? o.endTime ?? o.auctionEndsAt ?? o.closesAt ?? null;
+  // Alt calls the auction close "expiresAt" — NOT any of the endsAt/endTime
+  // spellings every other site uses, so this read silently produced null on
+  // every auction (live-verified 2026-08-01: 11 stored auctions, 0 end
+  // dates). It ships both an epoch-seconds field and a
+  // "YYYY-MM-DD HH:MM:SS+00:00" string; prefer the epoch, which can't be
+  // misread as local time. The legacy names stay as drift insurance.
+  const ends =
+    o.expiresAtEpoch ?? o.expiresAt ?? o.endsAtEpoch ??
+    o.endsAt ?? o.endTime ?? o.auctionEndsAt ?? o.closesAt ?? null;
   return {
     listingId: String(id),
     canonicalKey: `alt:${id}`,
@@ -147,10 +155,14 @@ export function mapAltListing(o) {
     price,
     currency: o.currency ?? 'USD',
     listingType: isAuction ? 'auction' : 'fixed',
-    endsAt: toIsoDate(ends),
+    // Only auctions have a meaningful close time; a Buy It Now's expiry is
+    // a listing-renewal date, and storing it would make the UI count down
+    // to something that isn't a deadline.
+    endsAt: isAuction ? toIsoDate(ends) : null,
     imageUrl:
       o.imageUrl ?? o.image ?? o.frontImageUrl ?? o.images?.[0]?.url ?? o.images?.[0] ?? null,
-    seller: null, // vault-held; no per-listing seller
+    // Alt is vault-held, but consignor usernames ARE on the listing.
+    seller: typeof o.seller === 'string' && o.seller.trim() ? o.seller.trim() : null,
   };
 }
 
@@ -296,7 +308,12 @@ export function createAltSource() {
         })`
       );
       if (out.length > 0) {
-        saveDebug('alt', 'api-sample', JSON.stringify(sniffed.slice(0, 2), null, 2).slice(0, 20000), 'json');
+        // Save the payloads the LISTINGS came from, not the first two
+        // responses off the wire — those are always the manifest and
+        // GraphQL chatter, which made every capture useless for diagnosing
+        // a field-mapping problem (live-hit 2026-08-01, missing end dates).
+        const matched = sniffed.filter((s) => requestCarriesQuery(s.url, s.postData, text));
+        saveDebug('alt', 'api-sample', JSON.stringify(matched, null, 2).slice(0, 2_000_000), 'json');
         // mapAltListing already drops other auction houses' items, so the
         // side-bar "Alt" filter doesn't need clicking.
         return out;
