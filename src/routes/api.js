@@ -3,6 +3,7 @@ import {
   BASELINE_COMPANY,
   COMPARE_GRADERS,
   COMPARE_GRADES,
+  GRADE_BASELINE,
   MANUAL_GRADERS,
   MANUAL_GRADES,
 } from '../config.js';
@@ -17,6 +18,9 @@ export function makeApiRouter(db, q, syncManager) {
       grades: COMPARE_GRADES,
       graders: COMPARE_GRADERS,
       baseline: BASELINE_COMPANY,
+      // Which PSA grade each compared grade is measured against, so the UI
+      // can say so instead of implying like-for-like everywhere.
+      gradeBaseline: GRADE_BASELINE,
       // Wider vocabularies for the Watched tab's hand-add form.
       manualGraders: MANUAL_GRADERS,
       manualGrades: MANUAL_GRADES,

@@ -196,7 +196,11 @@ function renderResults() {
       <td class="num grade-cell">${row.grade ?? '—'}</td>
       <td class="grade-cell">${row.grader ?? '—'}</td>
       <td class="num">${fmtMoney(row.grader_price)}</td>
-      <td class="num">${fmtMoney(row.psa_price)}</td>
+      <td class="num">${fmtMoney(row.psa_price)}${
+        row.psa_grade && row.psa_grade !== row.grade
+          ? `<div class="native-price">PSA ${esc(row.psa_grade)}</div>`
+          : ''
+      }</td>
       <td class="num ${diffClass}">${row.abs_diff >= 0 ? '+' : ''}${fmtMoney(row.abs_diff)}</td>
       <td class="num ${diffClass}">${row.pct_diff >= 0 ? '+' : ''}${row.pct_diff}%</td>
       <td class="date">${fmtDate(row.grader_last_sale_date)}</td>
@@ -222,7 +226,7 @@ function renderResults() {
     } else if (currentRows.length > 0) {
       emptyEl.textContent = 'All rows are hidden by the current Liquidity filter.';
     } else if (lastMeta.missing.length > 0) {
-      emptyEl.innerHTML = `No ${lastMeta.missing.map(esc).join(' or ')} vs PSA data synced yet — hit <strong>Sync</strong> to pull it.`;
+      emptyEl.innerHTML = `${esc(missingLabel(lastMeta.missing))} not synced yet — hit <strong>Sync</strong> to pull ${lastMeta.missing.length === 1 ? 'it' : 'them'}.`;
     } else {
       emptyEl.innerHTML = 'No matching cards — hit <strong>Sync</strong> to pull data from Card Ladder, or loosen the filters.';
     }
@@ -234,8 +238,20 @@ function renderResults() {
   if (rows.length !== lastMeta.total) bits.push(`${rows.length} of ${lastMeta.total} cards`);
   else bits.push(`${lastMeta.total} card${lastMeta.total === 1 ? '' : 's'} with both grades`);
   if (lastMeta.excluded > 0) bits.push(`${lastMeta.excluded} skipped (missing a grade on this basis)`);
-  for (const m of lastMeta.missing) bits.push(`no ${m} vs PSA data synced yet — run Sync to pull it`);
+  // ONE grouped note, not one per combination: with 4 graders × 7 grades a
+  // fresh DB produced 20 near-identical sentences that buried the counts.
+  if (lastMeta.missing.length > 0) bits.push(`${missingLabel(lastMeta.missing)} not synced yet — run Sync`);
   $('summary').textContent = bits.join(' · ');
+}
+
+// "SGC 9.5 vs PSA" for one, or "18 grader+grade pairs (SGC 9.5, BGS 9.5,
+// CGC 10, …)" for many — the whole list is still there, just not as 18
+// separate sentences.
+function missingLabel(missing) {
+  if (missing.length === 1) return `${missing[0]} vs PSA data`;
+  const shown = missing.slice(0, 3).join(', ');
+  const rest = missing.length - 3;
+  return `${missing.length} grader+grade pairs (${shown}${rest > 0 ? `, +${rest} more` : ''}) vs PSA`;
 }
 
 function updateSortArrows(tableId, sortCol, sortDir) {
@@ -337,13 +353,16 @@ async function triggerSync(resume) {
 // --- config-driven controls ------------------------------------------------
 
 // Fill a .checks container with one labeled checkbox per value, mirroring the
-// selections into stateMap (all start checked).
-function buildChecks(containerId, dataKey, values, stateMap) {
+// selections into stateMap (all start checked). `titleFor` optionally
+// explains a value on hover.
+function buildChecks(containerId, dataKey, values, stateMap, titleFor = () => '') {
   const box = $(containerId);
   box.innerHTML = '';
   for (const v of values) {
     stateMap[v] = true;
     const label = document.createElement('label');
+    const title = titleFor(v);
+    if (title) label.title = title;
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.dataset[dataKey] = v;
@@ -358,13 +377,20 @@ function buildChecks(containerId, dataKey, values, stateMap) {
 // grade or grader is a config.js-only change.
 async function loadConfig() {
   const cfg = await api('/api/config');
-  buildChecks('grade-filter', 'grade', cfg.grades, state.grades);
+  const baseline = cfg.gradeBaseline ?? {};
+  // Half grades don't pair like-for-like, so say what each one is measured
+  // against right on its checkbox rather than leaving the reader to assume.
+  buildChecks('grade-filter', 'grade', cfg.grades, state.grades, (g) =>
+    baseline[g] && baseline[g] !== g ? `Compared against ${cfg.baseline} ${baseline[g]}` : ''
+  );
   buildChecks('grader-filter', 'grader', cfg.graders, state.graders);
   // The hand-add form's dropdowns (wider vocabulary than the comparison).
   fillSelect('new-grader', cfg.manualGraders ?? [], 'SGC');
   fillSelect('new-grade', cfg.manualGrades ?? [], '10');
+  const halves = cfg.grades.filter((g) => baseline[g] && baseline[g] !== g);
   document.querySelector('.subtitle').textContent =
-    `${cfg.graders.join(' / ')} vs ${cfg.baseline} price disparity, like grade vs like grade`;
+    `${cfg.graders.join(' / ')} vs ${cfg.baseline} price disparity — like grade vs like grade` +
+    (halves.length ? `, half grades vs the whole grade below` : '');
 }
 
 // --- players + wiring ------------------------------------------------------

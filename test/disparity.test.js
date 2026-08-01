@@ -230,3 +230,83 @@ test('grades 8 and 7 pair like-for-like', () => {
   assert.equal(r7.total, 0);
   assert.deepEqual(r7.missingGrades, ['SGC 7']); // PSA side has no 7s at all
 });
+
+// --- half grades: 9.5/8.5/7.5 pair DOWN to the whole grade below ----------
+
+test('a 9.5 is compared against PSA 9, not PSA 9.5 or PSA 10', () => {
+  const { q } = seedDb();
+  const c1 = q.getCardByClId.get('c1').id;
+  const price = (company, grade, clValue) =>
+    q.upsertGradePrice.run({ cardId: c1, company, grade, clValue, lastSalePrice: clValue, lastSaleDate: '2026-07-01', population: null, numSales: null, syncRunId: null });
+  price('BGS', '9.5', 2000);
+  price('PSA', '9', 3000);
+  // A PSA 10 exists from the seed (5000) and must NOT be the counterpart.
+  const r = q.resultsQuery({ ...base, grades: ['9.5'], graders: ['BGS'] });
+  assert.equal(r.rows.length, 1);
+  assert.equal(r.rows[0].grade, '9.5');
+  assert.equal(r.rows[0].psa_grade, '9');
+  assert.equal(r.rows[0].grader_price, 2000);
+  assert.equal(r.rows[0].psa_price, 3000); // PSA 9, not the 5000 PSA 10
+  assert.equal(r.missingGrades.length, 0);
+});
+
+test('8.5 pairs with PSA 8 and 7.5 with PSA 7, independently', () => {
+  const { q } = seedDb();
+  const c1 = q.getCardByClId.get('c1').id;
+  const price = (company, grade, clValue) =>
+    q.upsertGradePrice.run({ cardId: c1, company, grade, clValue, lastSalePrice: clValue, lastSaleDate: '2026-07-01', population: null, numSales: null, syncRunId: null });
+  price('BGS', '8.5', 800);
+  price('PSA', '8', 1200);
+  price('BGS', '7.5', 300);
+  price('PSA', '7', 500);
+
+  const r85 = q.resultsQuery({ ...base, grades: ['8.5'], graders: ['BGS'] });
+  assert.deepEqual(r85.rows.map((x) => [x.grade, x.psa_grade, x.grader_price, x.psa_price]), [['8.5', '8', 800, 1200]]);
+  const r75 = q.resultsQuery({ ...base, grades: ['7.5'], graders: ['BGS'] });
+  assert.deepEqual(r75.rows.map((x) => [x.grade, x.psa_grade, x.grader_price, x.psa_price]), [['7.5', '7', 300, 500]]);
+  // Both at once stay separate rows — a half grade never merges with its
+  // whole-grade neighbour.
+  const both = q.resultsQuery({ ...base, grades: ['8.5', '7.5'], graders: ['BGS'] });
+  assert.equal(both.total, 2);
+});
+
+test('a whole grade and the half grade above it both use the same PSA row without colliding', () => {
+  const { q } = seedDb();
+  const c1 = q.getCardByClId.get('c1').id;
+  const price = (company, grade, clValue) =>
+    q.upsertGradePrice.run({ cardId: c1, company, grade, clValue, lastSalePrice: clValue, lastSaleDate: '2026-07-01', population: null, numSales: null, syncRunId: null });
+  price('BGS', '9.5', 2000);
+  price('BGS', '9', 1000);
+  price('PSA', '9', 3000);
+
+  const r = q.resultsQuery({ ...base, grades: ['9.5', '9'], graders: ['BGS'] });
+  assert.equal(r.total, 2);
+  const byGrade = Object.fromEntries(r.rows.map((x) => [x.grade, x]));
+  assert.equal(byGrade['9.5'].psa_price, 3000);
+  assert.equal(byGrade['9'].psa_price, 3000);
+  // Same baseline, different grader prices -> different gaps.
+  assert.equal(byGrade['9.5'].abs_diff, 1000);
+  assert.equal(byGrade['9'].abs_diff, 2000);
+});
+
+test('missingGrades reports the BASELINE grade a half grade needs', () => {
+  const { q } = seedDb();
+  const c1 = q.getCardByClId.get('c1').id;
+  // A BGS 9.5 with no PSA 9 anywhere: the pair is impossible, and the hint
+  // must not be satisfied by the PSA 10 that does exist.
+  q.upsertGradePrice.run({ cardId: c1, company: 'BGS', grade: '9.5', clValue: 2000, lastSalePrice: 2000, lastSaleDate: '2026-07-01', population: null, numSales: null, syncRunId: null });
+  const r = q.resultsQuery({ ...base, grades: ['9.5'], graders: ['BGS'] });
+  assert.equal(r.total, 0);
+  assert.deepEqual(r.missingGrades, ['BGS 9.5']);
+});
+
+test('CGC and CSG are accepted graders; a bogus grader string is still dropped', () => {
+  const { q } = seedDb();
+  const c1 = q.getCardByClId.get('c1').id;
+  q.upsertGradePrice.run({ cardId: c1, company: 'CGC', grade: '9.5', clValue: 1500, lastSalePrice: 1500, lastSaleDate: '2026-07-01', population: null, numSales: null, syncRunId: null });
+  q.upsertGradePrice.run({ cardId: c1, company: 'PSA', grade: '9', clValue: 3000, lastSalePrice: 3000, lastSaleDate: '2026-07-01', population: null, numSales: null, syncRunId: null });
+  const cgc = q.resultsQuery({ ...base, grades: ['9.5'], graders: ['CGC'] });
+  assert.deepEqual(cgc.rows.map((x) => [x.grader, x.grade, x.psa_grade]), [['CGC', '9.5', '9']]);
+  assert.equal(q.resultsQuery({ ...base, graders: ['CSG'] }).total, 0); // valid, just no data
+  assert.equal(q.resultsQuery({ ...base, graders: ['NOPE'] }).total, 0);
+});

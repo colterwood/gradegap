@@ -8,10 +8,12 @@
 const GRADERS = ['PSA', 'SGC', 'BGS', 'CGC', 'CSG'];
 
 // SGC's numeric 10 exists as both "10 Gem Mint" and the rarer, pricier
-// "10 Pristine". We canonicalize SGC Pristine to grade '10 PRI' so the
-// SGC-10-Gem-Mint vs PSA-10 comparison can never accidentally use a Pristine
-// value. Only SGC gets this treatment: for BGS "Pristine" IS the standard 10
-// label, and PSA 10 is always Gem Mint.
+// "10 Pristine", and CGC's does too — the Ladder serves "CGC 10 Pristine"
+// as its own condition (212 rows, live-checked 2026-08-01). Canonicalize
+// both to grade '10 PRI' so a Pristine value can never be used as the
+// plain Gem-Mint-10 price in a comparison. NOT for BGS, where "Pristine"
+// IS the standard 10 label, nor PSA, whose 10 is always Gem Mint.
+const PRISTINE_COMPANIES = new Set(['SGC', 'CGC']);
 const PRISTINE_RE = /\bpri(?:stine)?\b/i;
 // BGS's numeric 10 likewise has a rarer, far pricier tier: "Black Label"
 // (all subgrades 10). Canonicalize it to '10 BL' so such a row can never
@@ -24,7 +26,7 @@ function normalizeGrade(company, gradeRaw, contextText) {
   const num = text.match(/[0-9]{1,2}(?:\.[05])?/);
   if (!num) return null;
   let grade = num[0];
-  if (company === 'SGC' && grade === '10' && (PRISTINE_RE.test(text) || PRISTINE_RE.test(contextText))) {
+  if (PRISTINE_COMPANIES.has(company) && grade === '10' && (PRISTINE_RE.test(text) || PRISTINE_RE.test(contextText))) {
     grade = '10 PRI';
   }
   if (company === 'BGS' && grade === '10' && (BLACK_LABEL_RE.test(text) || BLACK_LABEL_RE.test(contextText))) {

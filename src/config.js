@@ -28,24 +28,54 @@ export const BASELINE_COMPANY = 'PSA';
 // Graders that can be compared against PSA — the UI's Grader dropdown. Note on
 // grade labels: condition "SGC 10" is Gem Mint (the adapter normalizes SGC's
 // rarer "10 Pristine" to grade '10 PRI' so it can never leak into the 10
-// comparison); condition "BGS 10" is BGS Pristine, its standard numeric 10.
-export const COMPARE_GRADERS = ['SGC', 'BGS'];
+// comparison); condition "BGS 10" is BGS Pristine, its standard numeric 10;
+// "CGC 10" is Gem Mint, with CGC's higher "10 Pristine" tier canonicalized
+// away the same way SGC's is. Ladder volumes when these were added
+// (2026-08-01): CGC ~2,900 rows across the compared grades, CSG only 8 —
+// CSG is kept because it costs one near-empty page per grade to crawl.
+export const COMPARE_GRADERS = ['SGC', 'BGS', 'CGC', 'CSG'];
 
-// The numeric grades we compare like-for-like: <grader> N vs PSA N. A 9 is
-// NEVER compared against a 10 — each grade is its own paired comparison.
-// (BGS half grades like 9.5 exist on the Ladder but are deliberately not
-// crawled: they have no like-for-like PSA counterpart in this scheme.)
-export const COMPARE_GRADES = ['10', '9', '8', '7'];
+// Each compared grade and the PSA grade it is measured against.
+//
+// Whole grades pair like-for-like (a 9 is never compared against a 10).
+// HALF grades pair DOWN to the whole grade below: a BGS 9.5 is measured
+// against PSA 9. That is the intended reading — "what does this half-grade
+// slab cost versus the PSA grade it trades near" — not a data limitation.
+// PSA 9.5 genuinely does not exist on the Ladder (0 rows), though PSA 8.5
+// (689) and PSA 7.5 (320) do; pairing 8.5 against PSA 8.5 instead is a
+// one-line change here, and nothing else needs to know.
+// Ordered [grade, PSA grade it pairs with], best grade first. An ARRAY,
+// not an object: JS reorders integer-like object keys ahead of the rest,
+// which turned a 10-first list into "7, 8, 9, 10, 9.5, …" — the order
+// drives both the UI's checkboxes and the crawl's priority.
+const GRADE_PAIRS = [
+  ['10', '10'],
+  ['9.5', '9'],
+  ['9', '9'],
+  ['8.5', '8'],
+  ['8', '8'],
+  ['7.5', '7'],
+  ['7', '7'],
+];
 
-// Conditions the sync crawls, one grade-filtered pass each: every compare
-// grader plus the PSA baseline, per grade. Compare graders before PSA per
-// grade so their (smaller) universes and card-page links seed shared cards
-// first.
+export const GRADE_BASELINE = Object.fromEntries(GRADE_PAIRS);
+
+// The grades offered in the UI, best first.
+export const COMPARE_GRADES = GRADE_PAIRS.map(([g]) => g);
+
+// The PSA grade a compared grade is measured against (identity for anything
+// unmapped, so a future grade can't silently vanish from a join).
+export const baselineGrade = (g) => GRADE_BASELINE[String(g)] ?? String(g);
+
+// The distinct PSA grades worth crawling — 9.5/9 both resolve to PSA 9, so
+// the baseline side is crawled once per distinct grade, not once per grade.
+export const BASELINE_GRADES = [...new Set(GRADE_PAIRS.map(([, b]) => b))];
+
 // Vocabularies for hand-added watches (the Watched tab's add form). Wider
 // than the disparity comparison: any grader, half grades, Authentic, and
 // the ungraded pairing — 'None' grader <-> 'Raw' grade always travel
 // together and mean "must NOT be slabbed".
-export const MANUAL_GRADERS = ['Any', 'None', 'SGC', 'PSA', 'BGS'];
+export const MANUAL_GRADERS = ['Any', 'None', 'SGC', 'PSA', 'BGS', 'CGC', 'CSG'];
 export const MANUAL_GRADES = [
   'Any', 'Raw',
   '10', '9.5', '9', '8.5', '8', '7.5', '7', '6.5', '6', '5.5', '5',
@@ -53,10 +83,25 @@ export const MANUAL_GRADES = [
   'Authentic',
 ];
 
-export const CRAWL_CONDITIONS = COMPARE_GRADES.flatMap((g) => [
-  ...COMPARE_GRADERS.map((c) => `${c} ${g}`),
-  `${BASELINE_COMPANY} ${g}`,
-]);
+// Conditions the sync crawls, one grade-filtered pass each: every compare
+// grader plus the PSA baseline that grade pairs with. Compare graders come
+// before PSA per grade so their (smaller) universes and card-page links
+// seed shared cards first, and a baseline reached by two grades (PSA 9
+// serves both 9.5 and 9) is crawled only once.
+export const CRAWL_CONDITIONS = (() => {
+  const seen = new Set();
+  const out = [];
+  const add = (condition) => {
+    if (seen.has(condition)) return;
+    seen.add(condition);
+    out.push(condition);
+  };
+  for (const g of COMPARE_GRADES) {
+    for (const c of COMPARE_GRADERS) add(`${c} ${g}`);
+    add(`${BASELINE_COMPANY} ${baselineGrade(g)}`);
+  }
+  return out;
+})();
 
 export const config = {
   port: intEnv('PORT', 4000),

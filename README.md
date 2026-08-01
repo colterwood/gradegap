@@ -3,13 +3,16 @@
 A personal, local-only web app that finds sports cards with the biggest price
 disparity between another grader's slab and **PSA**, using data from your own
 [Card Ladder](https://app.cardladder.com) account. Pick one or more graders
-(**SGC**, **BGS**) with the Grader checkboxes; PSA is always the compare-to
-side and every row is tagged with its grader. It compares like grades only —
-grader 10 vs PSA 10, 9 vs 9, 8 vs 8, 7 vs 7; a 9 is never compared against a
-10. Pick any subset of grades with the **Grade** checkboxes; a card can appear
-once per grade per grader. (SGC's rarer "10 Pristine" and BGS's "Black Label"
-are deliberately excluded from the 10 comparison, and BGS half grades like 9.5
-aren't crawled — they have no like-for-like PSA counterpart.)
+(**SGC**, **BGS**, **CGC**, **CSG**) with the Grader checkboxes; PSA is always
+the compare-to side and every row is tagged with its grader. Whole grades are
+compared like-for-like — grader 10 vs PSA 10, 9 vs 9, 8 vs 8, 7 vs 7; a 9 is
+never compared against a 10. **Half grades pair down** to the whole grade
+below, since that is the grade they trade against: **9.5 vs PSA 9, 8.5 vs
+PSA 8, 7.5 vs PSA 7**. Each row shows the PSA grade it was measured against
+when it differs. Pick any subset of grades with the **Grade** checkboxes; a
+card can appear once per grade per grader. (SGC's and CGC's rarer "10
+Pristine" and BGS's "Black Label" are deliberately excluded from the 10
+comparison — they are pricier tiers, not the standard Gem Mint 10.)
 
 Everything runs on your computer. Your Card Ladder login happens in a real
 browser window on your machine; your password is never stored (unless you opt
@@ -19,9 +22,10 @@ in via `.env`) and never leaves your computer.
 
 - Click **Sync** in the web UI → a Chromium window (driven by Playwright,
   logged in as you) opens the Ladder and pulls its grade-filtered list API in
-  bulk: one pass per grader-and-grade condition (**SGC**, **BGS**, and
-  **PSA** × grades **10, 9, 8, 7** — twelve passes, driven by
-  `COMPARE_GRADERS`/`COMPARE_GRADES` in `src/config.js`). Each page
+  bulk: one pass per grader-and-grade condition (**SGC / BGS / CGC / CSG** ×
+  grades **10, 9.5, 9, 8.5, 8, 7.5, 7**, plus **PSA** at the four whole
+  grades those pair against — 32 passes, driven by `COMPARE_GRADERS` and
+  `GRADE_BASELINE` in `src/config.js`). Each page
   of that API returns many cards *with their values already on the row*, so
   there are **no per-card page visits** — a full catalog sync is a few hundred
   JSON requests (minutes), not one page load per card.
@@ -30,7 +34,8 @@ in via `.env`) and never leaves your computer.
   the results page is instant and works offline.
 - The table ranks cards by disparity — toggleable between **% difference**
   and **$ difference**, between **CL Value** and **Last Sale** price basis,
-  and filterable by grader (SGC / BGS), grade (7–10), liquidity (last-sale
+  and filterable by grader (SGC / BGS / CGC / CSG), grade (7–10 including
+  half grades), liquidity (last-sale
   recency; defaults to green — both sides sold in the last 3 months), maximum
   grader-side price (0 = no cap), minimum dollar gap (**Min $ Diff**), minimum percentage
   gap (**Min % Diff**, default 15%), and player. **Grade** and **Grader**
@@ -96,8 +101,8 @@ npm start
 npm start          # → http://localhost:4000, click Sync when you want fresh data
 ```
 
-- A sync pages through every grader × grade list (SGC/BGS/PSA × 10/9/8/7 — a
-  few hundred requests total, ~10 minutes). The progress bar shows where it is,
+- A sync pages through every grader × grade list (32 passes; a few hundred
+  requests total, ~10–15 minutes). The progress bar shows where it is,
   **Cancel** stops it cleanly, and an interrupted sync can be **Resumed**.
 - If Card Ladder logs you out mid-sync, the run stops with a message — just
   `npm run login` again and Resume.

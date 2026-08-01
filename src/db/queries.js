@@ -1,6 +1,17 @@
 // All prepared statements live here. Parsers and routes never build SQL.
 
-import { BASELINE_COMPANY, COMPARE_GRADERS, COMPARE_GRADES } from '../config.js';
+import { BASELINE_COMPANY, COMPARE_GRADERS, COMPARE_GRADES, baselineGrade } from '../config.js';
+
+// SQL that maps a grader-side grade to the PSA grade it is compared
+// against (9.5 -> 9, and so on; see GRADE_BASELINE in config.js). Built
+// from the config so the mapping lives in exactly one place. `col` is the
+// grade expression to translate; all values are config literals.
+function baselineGradeSql(col, grades) {
+  const arms = grades
+    .filter((g) => baselineGrade(g) !== g)
+    .map((g) => `WHEN '${g}' THEN '${baselineGrade(g)}'`);
+  return arms.length === 0 ? col : `CASE ${col} ${arms.join(' ')} ELSE ${col} END`;
+}
 
 export function makeQueries(db) {
   const upsertCard = db.prepare(`
@@ -72,7 +83,9 @@ export function makeQueries(db) {
     const present = new Set(listGradePresence.all().map((r) => `${r.grading_company}|${r.grade}`));
     const missingGrades = graderList.flatMap((c) =>
       gradeList
-        .filter((g) => !present.has(`${c}|${g}`) || !present.has(`${BASELINE_COMPANY}|${g}`))
+        // The baseline side is checked at the grade it actually pairs with:
+        // a 9.5 needs PSA 9, and PSA 9.5 doesn't exist at all.
+        .filter((g) => !present.has(`${c}|${g}`) || !present.has(`${BASELINE_COMPANY}|${baselineGrade(g)}`))
         .map((g) => `${c} ${g}`)
     );
 
@@ -94,6 +107,11 @@ export function makeQueries(db) {
     // validated against the fixed config allowlists above, so that's safe.
     const gradeIn = gradeList.map((g) => `'${g}'`).join(', ');
     const graderIn = graderList.map((c) => `'${c}'`).join(', ');
+    // The PSA grades these selections actually pair against, deduped —
+    // used by the join and by the one-sided psa_rows count below.
+    const psaGradeIn = [...new Set(gradeList.map((g) => baselineGrade(g)))]
+      .map((g) => `'${g}'`)
+      .join(', ');
 
     const cte = `
       WITH comparable AS (
@@ -101,6 +119,7 @@ export function makeQueries(db) {
           c.id AS card_id, c.name, c.set_name, c.year, c.card_number, c.parallel, c.cl_url,
           p.name AS player_name,
           grd.grade AS grade,
+          psa.grade AS psa_grade,
           grd.grading_company AS grader,
           grd.${basisCol} AS grader_price,
           psa.${basisCol} AS psa_price,
@@ -118,7 +137,9 @@ export function makeQueries(db) {
           ROUND((psa.${basisCol} - grd.${basisCol}) * 100.0 / grd.${basisCol}, 1) AS pct_diff
         FROM grade_prices grd
         JOIN grade_prices psa ON psa.card_id = grd.card_id
-          AND psa.grade = grd.grade
+          -- NOT like-for-like any more: half grades pair DOWN to the whole
+          -- grade below (BGS 9.5 vs PSA 9), per GRADE_BASELINE.
+          AND psa.grade = ${baselineGradeSql('grd.grade', gradeList)}
           AND psa.grading_company = '${BASELINE_COMPANY}'
         JOIN cards c ON c.id = grd.card_id
         LEFT JOIN players p ON p.id = c.player_id
@@ -157,7 +178,7 @@ export function makeQueries(db) {
           WHERE gp.grading_company IN (${graderIn}) AND gp.grade IN (${gradeIn})
             AND gp.${basisCol} IS NOT NULL ${playerFilter}) AS grader_rows,
         (SELECT COUNT(*) FROM grade_prices gp JOIN cards c ON c.id = gp.card_id
-          WHERE gp.grading_company = '${BASELINE_COMPANY}' AND gp.grade IN (${gradeIn})
+          WHERE gp.grading_company = '${BASELINE_COMPANY}' AND gp.grade IN (${psaGradeIn})
             AND gp.${basisCol} IS NOT NULL ${playerFilter}) AS psa_rows
     `).get(params);
 
@@ -368,11 +389,12 @@ export function makeQueries(db) {
     `),
     // cl_value = the Card Ladder value for the watched card at that exact
     // grader+grade, so a listing's asking price can be read against it.
-    // psa_value = the same card's PSA value AT THE SAME GRADE (an SGC 9
-    // watch compares against PSA 9, not PSA 10) — the like-for-like number
-    // the whole app is built around. Both are NULL for manual watches (no
-    // Ladder card behind them), and psa_value simply equals cl_value when
-    // the watch is itself a PSA slab.
+    // psa_value = the same card's PSA value at the grade this one is
+    // COMPARED against — PSA 9 for an SGC 9 watch, and also PSA 9 for a
+    // BGS 9.5 watch (half grades pair down; see GRADE_BASELINE). Never
+    // crossed with PSA 10. Both are NULL for manual watches (no Ladder card
+    // behind them), and psa_value equals cl_value when the watch is itself
+    // a PSA slab at a whole grade.
     listMatches: db.prepare(`
       SELECT l.*, w.grading_company, w.grade, w.card_id,
              COALESCE(c.name, w.description) AS card_name, p.name AS player_name,
@@ -386,7 +408,7 @@ export function makeQueries(db) {
         ON gp.card_id = w.card_id AND gp.grading_company = w.grading_company AND gp.grade = w.grade
       LEFT JOIN grade_prices gp_psa
         ON gp_psa.card_id = w.card_id AND gp_psa.grading_company = '${BASELINE_COMPANY}'
-        AND gp_psa.grade = w.grade
+        AND gp_psa.grade = ${baselineGradeSql('w.grade', COMPARE_GRADES)}
       WHERE (@watchId IS NULL OR l.watch_id = @watchId)
         AND instr(@statuses, '|' || l.status || '|') > 0
         AND (@followed IS NULL OR l.followed = @followed)
