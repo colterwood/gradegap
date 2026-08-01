@@ -7,7 +7,7 @@
 // Verify locally with `npm run test-source catawiki "jordan psa 10"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { saveDebug, debugLog, gotoStable } from './util.js';
+import { saveDebug, debugLog, gotoStable, toIsoDate } from './util.js';
 
 const SITE = 'https://www.catawiki.com';
 
@@ -22,6 +22,12 @@ export function parseCatawikiLots(searchLots, biddingById) {
     // Prefer the platform's own USD quote; fall back to native EUR.
     const usd = amounts?.USD ?? null;
     const eur = amounts?.EUR ?? null;
+    // A bidding end time IS the format signal. Buy-now on Catawiki is an
+    // EXTRA option on a running auction lot (offered until the first bid
+    // lands), not a separate fixed-price format — labelling those 'fixed'
+    // exempted them from the ended-auction sweep and from every
+    // ending-soon alert, even though the close time was right there.
+    const endsAt = bid?.bidding_end_time ?? null;
     out.push({
       listingId: String(lot.id),
       canonicalKey: `catawiki:${lot.id}`,
@@ -29,8 +35,8 @@ export function parseCatawikiLots(searchLots, biddingById) {
       url: lot.url ?? `${SITE}/en/l/${lot.id}`,
       price: usd ?? eur,
       currency: usd != null ? 'USD' : 'EUR',
-      listingType: bid?.is_buy_now_available ? 'fixed' : 'auction',
-      endsAt: bid?.bidding_end_time ?? null,
+      listingType: endsAt ? 'auction' : 'fixed',
+      endsAt: toIsoDate(endsAt),
       imageUrl: lot.originalImageUrl ?? lot.original_image_url ?? lot.thumbnail2_url ?? null,
       seller: null,
     });

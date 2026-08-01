@@ -6,7 +6,7 @@
 // Verify locally with `npm run test-source myslabs "jordan psa 10"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { gotoStable, parkPage, debugLog } from './util.js';
+import { gotoStable, parkPage, debugLog, relativeToIso } from './util.js';
 
 const SITE = 'https://www.myslabs.com';
 
@@ -21,7 +21,7 @@ export function createMySlabsSource() {
     await gotoStable(page, url);
     await page.waitForTimeout(2500); // JS render + lazy tiles
 
-    return page.$$eval('.slab_item', (tiles, meta) =>
+    const tiles = await page.$$eval('.slab_item', (tiles, meta) =>
       tiles.map((tile) => {
         const a = tile.querySelector('.slab_item_img_inside a') ?? tile.querySelector('a[href]');
         const href = a?.getAttribute('href') ?? null;
@@ -35,6 +35,11 @@ export function createMySlabsSource() {
           tile.querySelector('.slab-price')?.textContent?.match(/\$[\d,]+(?:\.\d{2})?/)?.[0] ??
           tile.textContent?.match(/\$\s*[\d,]+(?:\.\d{2})?/)?.[0];
         const img = tile.querySelector('.slab_item_img_inside img') ?? tile.querySelector('img');
+        // Auction tiles DO carry an end time, as a relative countdown
+        // ("06d 19h 13m") in .auction-feed-clock — it was hardcoded null,
+        // so every MySlabs auction landed with no deadline: no ending-soon
+        // alert, no countdown, and exempt from the ended-auction sweep.
+        const clock = tile.querySelector('.auction-feed-clock')?.textContent?.trim() ?? null;
         return {
           listingId: String(id),
           canonicalKey: `myslabs:${id}`,
@@ -43,7 +48,7 @@ export function createMySlabsSource() {
           price: priceText ? parseFloat(priceText.replace(/[$,\s]/g, '')) : null,
           currency: 'USD',
           listingType: meta.listingType,
-          endsAt: null, // end time isn't on the tile; the detail page has it
+          endsAtRelative: meta.listingType === 'auction' ? clock : null,
           imageUrl: img?.getAttribute('data-src') ?? img?.src ?? null,
           seller: null,
         };
@@ -55,6 +60,15 @@ export function createMySlabsSource() {
     // successful empty scrapes, which advance the staleness counter and
     // eventually delete tracked listings. Real errors now reach search()'s
     // per-venue handler and the run records a failure.
+
+    // The countdown is resolved OUT here, against this machine's clock —
+    // the page's own JS clock could be skewed, and the browser context
+    // can't share helpers anyway.
+    const now = Date.now();
+    return tiles.map(({ endsAtRelative, ...l }) => ({
+      ...l,
+      endsAt: relativeToIso(endsAtRelative, now),
+    }));
   }
 
   return {

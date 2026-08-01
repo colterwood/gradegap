@@ -7,25 +7,31 @@
 // `npm run test-source heritage "jordan psa 10"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { saveDebug, debugLog, gotoStable } from './util.js';
+import { saveDebug, debugLog, gotoStable, relativeToIso, zonedToIso } from './util.js';
 
 const SITE = 'https://sports.ha.com';
+// Heritage is in Dallas and quotes closings in US Central.
+const SITE_TZ = 'America/Chicago';
 
 // Live tiles show RELATIVE end times ("25 days", "6 hours 12 minutes") —
-// convert to an approximate ISO timestamp; absolute dates pass through.
+// convert to an approximate ISO timestamp; absolute dates are resolved
+// against Heritage's own zone rather than the scraper machine's, which
+// otherwise moved the stored end time by the host's offset.
 // Exported for tests.
 export function parseHeritageEnds(text, now = Date.now()) {
   if (!text) return null;
+  const relative = relativeToIso(text, now);
+  if (relative) return relative;
   const s = String(text).trim();
-  let ms = 0;
-  const take = (re, unit) => {
-    const m = s.match(re);
-    if (m) ms += Number(m[1]) * unit;
-  };
-  take(/(\d+)\s*day/i, 24 * 60 * 60 * 1000);
-  take(/(\d+)\s*hour/i, 60 * 60 * 1000);
-  take(/(\d+)\s*min/i, 60 * 1000);
-  if (ms > 0) return new Date(now + ms).toISOString();
+  // A bare "Aug 9, 2026" has no time and no zone: read it in Central and
+  // bias to the end of that day, so an auction is never dropped early by
+  // the ended-auction sweep.
+  if (/^[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}$/.test(s)) {
+    const d = new Date(`${s} 00:00:00Z`);
+    if (isNaN(d.getTime())) return null;
+    const [y, mo, day] = d.toISOString().slice(0, 10).split('-');
+    return zonedToIso(`${y}-${mo}-${day} 23:59:00`, SITE_TZ);
+  }
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d.toISOString();
 }

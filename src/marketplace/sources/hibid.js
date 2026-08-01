@@ -9,9 +9,14 @@
 // Verify locally with `npm run test-source hibid "psa 10 jordan"`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { gotoStable } from './util.js';
+import { gotoStable, zonedToIso } from './util.js';
 
 const SITE = 'https://hibid.com';
+// bidCloseDateTime arrives WITHOUT a zone. Live-verified against the
+// per-lot countdown across auctions in CA/OH/KS/IL/MO (2026-08-01): only
+// reading it as US Eastern makes every lot close AFTER its event's stated
+// time; every other reading puts lots before their own auction started.
+const HIBID_TZ = 'America/New_York';
 
 // HiBid lot links are /lot/<itemId>/<slugified-lead> (user-verified live).
 // Their slugifier turns EVERY non-alphanumeric character into a dash
@@ -49,11 +54,23 @@ const LOT_SEARCH_QUERY = `query LotSearch($auctionId: Int = null, $pageNumber: I
 }`;
 
 // Pure, fixture-testable: GraphQL results → normalized raw listings.
-export function parseHibidResults(results) {
+// nowMs is the instant the response was requested, so the per-lot
+// countdown can be turned into an absolute end time.
+export function parseHibidResults(results, nowMs = Date.now()) {
   const out = [];
   for (const lot of results ?? []) {
     if (lot?.itemId == null || !lot.lead) continue;
     if (lot.lotState?.isClosed) continue;
+    // HiBid closes lots in a staggered sequence, so the per-lot countdown
+    // is both more accurate than the event-wide bidCloseDateTime AND free
+    // of the zone guessing that field needs (live-verified: lots in one
+    // auction differed by 80 minutes while sharing a bidCloseDateTime).
+    // A 0/absent countdown means a live webcast lot — fall back to the
+    // event close, read in HiBid's Eastern zone.
+    const secs = lot.lotState?.timeLeftSeconds;
+    const endsAt = Number.isFinite(secs) && secs > 0
+      ? new Date(nowMs + secs * 1000).toISOString()
+      : zonedToIso(lot.auction?.bidCloseDateTime, HIBID_TZ);
     // A lot with no bids reports highBid 0 — that's "no price yet", not $0.
     const highBid = lot.lotState?.highBid;
     const minBid = lot.lotState?.minBid;
@@ -65,7 +82,7 @@ export function parseHibidResults(results) {
       price: highBid > 0 ? highBid : minBid > 0 ? minBid : null,
       currency: lot.auction?.currencyAbbreviation ?? 'CAD',
       listingType: 'auction',
-      endsAt: lot.auction?.bidCloseDateTime ?? null,
+      endsAt,
       imageUrl: lot.featuredPicture?.thumbnailLocation ?? lot.featuredPicture?.fullSizeLocation ?? null,
       // House + location, so Canadian vs US lots are visible at a glance
       // (the global search spans both).
@@ -98,6 +115,9 @@ export function createHibidSource() {
     },
 
     async search({ text }) {
+      // Captured before the request so the per-lot countdown in the
+      // response can be resolved to an absolute instant.
+      const requestedAt = Date.now();
       const res = await page.evaluate(
         async ({ query, searchText }) => {
           try {
@@ -140,7 +160,7 @@ export function createHibidSource() {
       }
       const paged = res.body.data?.lotSearch?.pagedResults;
       if (!paged) throw new Error('HiBid GraphQL: no lotSearch data in response (schema changed?)');
-      return parseHibidResults(paged.results);
+      return parseHibidResults(paged.results, requestedAt);
     },
 
     async close() {

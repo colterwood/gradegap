@@ -119,13 +119,19 @@ export function createGoldinSource() {
         for (let i = 0; i < patienceSec && sniffed.length === 0; i++) await page.waitForTimeout(1000);
         await page.waitForTimeout(1500); // let a late richer response land too
         debugLog('goldin', `${path} sniffed ${sniffed.length} lots-shaped responses`);
-        const out = [];
-        const seen = new Set();
+        // First-wins dedupe made the extra 1500ms wait above pointless for
+        // lots already seen: a later, FULLER payload (one carrying
+        // end_timestamp when the first didn't) was dropped. Merge instead —
+        // a repeat lot fills in only the fields still missing.
+        const byId = new Map();
         for (const { json } of sniffed) {
           for (const l of parseGoldinLots(json, null, listingType)) {
-            if (!seen.has(l.listingId) && seen.add(l.listingId)) out.push(l);
+            const prev = byId.get(l.listingId);
+            if (!prev) byId.set(l.listingId, l);
+            else for (const [k, v] of Object.entries(l)) if (prev[k] == null && v != null) prev[k] = v;
           }
         }
+        const out = [...byId.values()];
         if (sniffed.length > 0) {
           saveDebug('goldin', `lots-${listingType}`, JSON.stringify(sniffed[0].json).slice(0, 20000), 'json');
         }

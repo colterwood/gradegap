@@ -14,7 +14,7 @@ import { parseFanaticsListing, parseFanaticsAlgoliaHit } from '../src/marketplac
 import { parseHibidResults } from '../src/marketplace/sources/hibid.js';
 import { parseAuctionWorxBrowse, parseAuctionWorxLotLinks } from '../src/marketplace/sources/cia.js';
 import { parseHeritageEnds } from '../src/marketplace/sources/heritage.js';
-import { parseClassicCatalog } from '../src/marketplace/sources/classic.js';
+import { parseClassicCatalog, parseClassicSaleStatus } from '../src/marketplace/sources/classic.js';
 import { extractViewVars, parseMillerLots } from '../src/marketplace/sources/miller.js';
 import { extractGoldinConfig, parseGoldinLots } from '../src/marketplace/sources/goldin.js';
 import { parseCatawikiLots } from '../src/marketplace/sources/catawiki.js';
@@ -48,9 +48,22 @@ test('fanatics: auction vs fixed, cents → dollars, end time', () => {
   });
   assert.equal(auction.listingType, 'auction');
   assert.equal(auction.price, 45000);
-  assert.equal(auction.endsAt, '2026-08-01T02:00:00Z');
+  assert.equal(auction.endsAt, '2026-08-01T02:00:00.000Z');
   // WEEKLY + id + slug -> the real /weekly/<uuid>/<slug> page (verified live).
   assert.equal(auction.url, 'https://www.fanaticscollect.com/weekly/abc-123/1986-fleer-jordan');
+
+  // This fallback path used to pass the end time through un-normalized,
+  // unlike the primary Algolia path — so an epoch (the shape Fanatics
+  // actually uses on the live index) reached storage as a bare number and
+  // was mis-read. It also only accepted the exact strings WEEKLY/PREMIER,
+  // so a plain 'AUCTION' type was stored as fixed with no end date at all.
+  const epochAuction = parseFanaticsListing({
+    id: 'e1', title: 'Card', listingType: 'AUCTION',
+    currentBid: { amountInCents: 1000 },
+    auction: { endsAt: 1785722400 },
+  });
+  assert.equal(epochAuction.listingType, 'auction');
+  assert.equal(epochAuction.endsAt, new Date(1785722400 * 1000).toISOString());
 
   const fixed = parseFanaticsListing({
     id: 'def',
@@ -86,6 +99,29 @@ test('hibid: maps lots, prefers highBid, drops closed, carries house currency', 
   assert.equal(out[0].currency, 'CAD');
   assert.equal(out[0].seller, 'Small Town Auctions');
   assert.equal(out[0].url, 'https://hibid.com/lot/111/1979-opc-wayne-gretzky-rc-psa-5');
+  // No per-lot countdown here, so the event close is used — and it arrives
+  // WITHOUT a zone, so it must resolve against HiBid's Eastern zone, not
+  // whatever zone the machine running the check happens to be in.
+  assert.equal(out[0].endsAt, '2026-08-03T04:00:00.000Z');
+});
+
+test('hibid: the per-lot countdown wins over the shared event close time', () => {
+  // Live-verified: lots in ONE auction share a bidCloseDateTime but close
+  // in a staggered sequence up to 80 minutes apart. Using the event value
+  // for all of them fired ending-soon alerts at the wrong moment for every
+  // lot but the last, and kept closed lots alive until the whole sale ended.
+  const auction = { bidCloseDateTime: '2026-08-05T19:00:00', currencyAbbreviation: 'USD' };
+  const now = Date.parse('2026-08-01T00:00:00Z');
+  const out = parseHibidResults([
+    { itemId: 1, lead: '1968 Topps #280 Mickey Mantle PSA 4', lotState: { highBid: 10, isClosed: false, timeLeftSeconds: 3600 }, auction },
+    { itemId: 2, lead: '1967 Topps #150 Mickey Mantle PSA 3', lotState: { highBid: 10, isClosed: false, timeLeftSeconds: 7200 }, auction },
+    // A live webcast lot reports 0 — fall back to the event close (Eastern).
+    { itemId: 3, lead: '1961 Topps Mickey Mantle PSA 1', lotState: { highBid: 10, isClosed: false, timeLeftSeconds: 0 }, auction },
+  ], now);
+  assert.equal(out[0].endsAt, '2026-08-01T01:00:00.000Z');
+  assert.equal(out[1].endsAt, '2026-08-01T02:00:00.000Z');
+  assert.notEqual(out[0].endsAt, out[1].endsAt); // staggered, not shared
+  assert.equal(out[2].endsAt, '2026-08-05T23:00:00.000Z'); // 19:00 EDT
 });
 
 // Verbatim structure from a live CIA /Browse page (2026-08-01): the
@@ -160,6 +196,29 @@ test('cia: winter lots resolve against Eastern STANDARD time', () => {
   assert.equal(out[0].endsAt, '2026-01-17T02:00:00.000Z'); // EST = UTC-5
 });
 
+test('classic: a finished sale is recognized so its sold lots are not served as live', () => {
+  // Verbatim wording from the live catalog (2026-08-01). The page keeps
+  // serving the closed sale's lots, each with a "Final Price" — emitting
+  // those as live auctions parked sold lots in the table forever, since
+  // the page never stops returning them so the miss counter never advances.
+  const closed = `<div class="head">Historical Hockey and Sports Memorabilia Auction June 2026
+    <span>Auction closed on 6/17/2026. Final prices include buyers premium.</span></div>`;
+  const s = parseClassicSaleStatus(closed, Date.parse('2026-08-01T00:00:00Z'));
+  assert.equal(s.closed, true);
+  // 23:59 Montreal on the closing day (EDT, UTC-4) = 03:59 UTC next day.
+  assert.equal(s.closingIso, '2026-06-18T03:59:00.000Z');
+
+  // The same wording for a sale still ahead is NOT closed, and its date
+  // becomes every lot's end time.
+  const live = `<span>Auction closes on 10/15/2026. Bid now.</span>`;
+  const t = parseClassicSaleStatus(live, Date.parse('2026-08-01T00:00:00Z'));
+  assert.equal(t.closed, false);
+  assert.equal(t.closingIso, '2026-10-16T03:59:00.000Z');
+
+  // No wording at all: no date, and not treated as closed.
+  assert.deepEqual(parseClassicSaleStatus('<p>no status here</p>'), { closingIso: null, closed: false });
+});
+
 test('classic: extracts lots from catalog anchors, dedupes both link styles', () => {
   const html = `
     <a href="/lot-173141.aspx">1951 Parkhurst Gordie Howe Rookie PSA 5 (Current Bid: $12,500.00)</a>
@@ -219,7 +278,30 @@ test('catawiki: joins search lots with bidding state, prefers USD quote, drops c
   assert.equal(out.length, 1);
   assert.equal(out[0].price, 11624);
   assert.equal(out[0].currency, 'USD');
-  assert.equal(out[0].endsAt, '2026-08-01T20:04:00Z');
+  assert.equal(out[0].endsAt, '2026-08-01T20:04:00.000Z');
+  assert.equal(out[0].listingType, 'auction');
+});
+
+test('catawiki: a buy-now-available lot with a close time is still an auction', () => {
+  // Buy-now is an EXTRA option on a running Catawiki auction (offered
+  // until the first bid), not a separate format. Calling it 'fixed'
+  // exempted the lot from the ended-auction sweep and from every
+  // ending-soon alert while its close time sat right there in the payload.
+  const out = parseCatawikiLots(
+    [{ id: 200, title: '1999 Pokemon Charizard PSA 9' }],
+    { 200: { closed: false, bidding_end_time: '2026-08-05T18:00:00Z', is_buy_now_available: true, current_bid_amount: { EUR: 500 } } }
+  );
+  assert.equal(out.length, 1);
+  assert.equal(out[0].listingType, 'auction');
+  assert.equal(out[0].endsAt, '2026-08-05T18:00:00.000Z');
+
+  // A genuine fixed-price lot (no bidding close at all) stays fixed.
+  const fixed = parseCatawikiLots(
+    [{ id: 201, title: '1999 Pokemon Blastoise PSA 9' }],
+    { 201: { closed: false, is_buy_now_available: true, current_bid_amount: { EUR: 300 } } }
+  );
+  assert.equal(fixed[0].listingType, 'fixed');
+  assert.equal(fixed[0].endsAt, null);
 });
 
 test('util: decodeEntities handles named + numeric refs', () => {
@@ -381,7 +463,13 @@ test('heritage: relative end times become ISO timestamps', () => {
   assert.equal(parseHeritageEnds('25 days', now), '2026-08-23T12:00:00.000Z');
   assert.equal(parseHeritageEnds('2 days 6 hours', now), '2026-07-31T18:00:00.000Z');
   assert.equal(parseHeritageEnds('45 minutes', now), '2026-07-29T12:45:00.000Z');
-  assert.match(parseHeritageEnds('Aug 9, 2026', now), /^2026-08-09T/);
+  // Abbreviated countdowns too (MySlabs renders "06d 19h 13m").
+  assert.equal(parseHeritageEnds('06d 19h 13m', now), '2026-08-05T07:13:00.000Z');
+  // A bare date is resolved in Heritage's own Central zone, at end of day —
+  // an EXACT instant, so a machine in another timezone fails this test
+  // instead of silently storing a different end time. A prefix match on
+  // /^2026-08-09T/ passed anywhere west of UTC and hid the bug.
+  assert.equal(parseHeritageEnds('Aug 9, 2026', now), '2026-08-10T04:59:00.000Z');
   assert.equal(parseHeritageEnds('Auction Ended', now), null);
   assert.equal(parseHeritageEnds(null, now), null);
 });

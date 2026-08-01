@@ -130,6 +130,34 @@ export function zonedToIso(naive, timeZone) {
   return isNaN(dt.getTime()) ? null : dt.toISOString();
 }
 
+// Auction tiles often render a COUNTDOWN rather than a timestamp, in every
+// abbreviation style going: "06d 19h 13m" (MySlabs), "25 days",
+// "6 hours 12 minutes" (Heritage). Sum whatever units are present and
+// anchor them to `now`. Returns null when no unit is found, so callers can
+// fall back to an absolute date. Exported for tests.
+const REL_UNITS = [
+  [/(\d+)\s*(?:d|days?)\b/i, 24 * 60 * 60 * 1000],
+  [/(\d+)\s*(?:h|hrs?|hours?)\b/i, 60 * 60 * 1000],
+  [/(\d+)\s*(?:m|mins?|minutes?)\b/i, 60 * 1000],
+  [/(\d+)\s*(?:s|secs?|seconds?)\b/i, 1000],
+];
+
+export function relativeToIso(text, now = Date.now()) {
+  const s = String(text ?? '').trim();
+  if (!s) return null;
+  let ms = 0;
+  let matched = false;
+  for (const [re, unit] of REL_UNITS) {
+    const m = s.match(re);
+    if (m) {
+      ms += Number(m[1]) * unit;
+      matched = true;
+    }
+  }
+  if (!matched || ms <= 0) return null;
+  return new Date(now + ms).toISOString();
+}
+
 export const centsToDollars = (c) => (c == null ? null : Math.round(Number(c)) / 100);
 
 export const toNumber = (v) => {

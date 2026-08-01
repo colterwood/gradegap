@@ -576,9 +576,12 @@ function fmtTimeLeft(endsAt) {
   return `${Math.floor(hours / 24)}d ${hours % 24}h left`;
 }
 
-// When a listing row was added, in Regina local time (the machine's zone;
-// no DST there, but Intl handles that either way). found_at is SQLite UTC.
-function fmtAdded(sqlTs) {
+// SQLite timestamps are UTC; every one shown in the UI goes through here
+// so the whole table reads in one zone. The Ends column used to print the
+// raw UTC string beside a locally-formatted Added column — two timestamps
+// six hours apart in meaning, with the countdown underneath (correct)
+// disagreeing with the date above it.
+function fmtLocal(sqlTs) {
   const d = parseSqlDate(sqlTs);
   if (!d || isNaN(d.getTime())) return '—';
   const p = Object.fromEntries(
@@ -590,6 +593,8 @@ function fmtAdded(sqlTs) {
   );
   return `${p.year}-${p.month}-${p.day} ${p.hour === '24' ? '00' : p.hour}:${p.minute}`;
 }
+
+const fmtAdded = fmtLocal;
 
 // None grader + Raw grade are one state: an ungraded card.
 const slabLabel = (w) =>
@@ -751,7 +756,7 @@ function renderMatches(viewKey) {
     const score = m.match_score == null ? '—' : `${Math.round(m.match_score * 100)}%`;
     const low = m.match_score != null && m.match_score < 0.7;
     const ends = m.listing_type === 'auction' && m.ends_at
-      ? `<span class="date">${esc(m.ends_at)}</span><br /><span class="time-left">${fmtTimeLeft(m.ends_at)}</span>`
+      ? `<span class="date">${esc(fmtLocal(m.ends_at))}</span><br /><span class="time-left">${fmtTimeLeft(m.ends_at)}</span>`
       : '—';
     const followCell = viewKey === 'listings'
       ? `<td class="watch-cell"><input type="checkbox" class="follow-cb" data-id="${m.id}" ${m.followed ? 'checked' : ''}

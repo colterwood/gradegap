@@ -190,7 +190,11 @@ const LISTINGS_QUERY = `
 // Pure, fixture-testable: one hydrated GraphQL listing → normalized listing.
 export function parseFanaticsListing(node) {
   if (!node?.id || !node.title) return null;
-  const isAuction = node.listingType === 'WEEKLY' || node.listingType === 'PREMIER';
+  // Same auction test as the primary Algolia path — an exact-match pair of
+  // strings meant a differently-cased or plainly 'AUCTION' listingType was
+  // stored as fixed here, which forces a null end date and exempts the row
+  // from every end-date behavior.
+  const isAuction = AUCTION_RE.test(String(node.listingType ?? node.marketplace ?? ''));
   const money = isAuction
     ? node.currentBid ?? node.startingPrice
     : node.buyNowPrice ?? node.askingPrice;
@@ -202,7 +206,13 @@ export function parseFanaticsListing(node) {
     price: centsToDollars(money?.amountInCents),
     currency: money?.currency ?? 'USD',
     listingType: isAuction ? 'auction' : 'fixed',
-    endsAt: isAuction ? node.auction?.endsAt ?? null : null,
+    // Normalized like the primary path: this fallback used to hand the raw
+    // value straight through, so an epoch (or a zone-less string) would be
+    // mis-stored — the exact "looks numeric, is actually ISO" trap that
+    // emptied every Goldin end time.
+    endsAt: isAuction
+      ? toIsoDate(node.auction?.endsAt ?? node.auction?.endTime ?? node.endsAt)
+      : null,
     imageUrl: node.imageSets?.[0]?.medium ?? node.imageSets?.[0]?.small ?? null,
     seller: null,
   };
