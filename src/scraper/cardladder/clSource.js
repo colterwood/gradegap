@@ -20,14 +20,19 @@ export function createCardLadderSource() {
   let context = null;
   let page = null;
   let lastAuth = null;
+  // Kept so close() can detach it — the context outlives this source
+  // whenever a marketplace run still holds the lease, and a leaked handler
+  // per sync accumulates forever (and fires on every page's traffic).
+  let onRequest = null;
 
   function watchAuth(ctx) {
-    ctx.on('request', (req) => {
+    onRequest = (req) => {
       try {
         const auth = req.headers()['authorization'];
         if (auth && req.url().includes('cardladder.com')) lastAuth = auth;
       } catch { /* header access can throw on some requests */ }
-    });
+    };
+    ctx.on('request', onRequest);
   }
 
   return {
@@ -35,14 +40,15 @@ export function createCardLadderSource() {
 
     async start() {
       // The persistent profile is shared (leased) with marketplace sources —
-      // see browserLease.js. This source opens its own page in it.
+      // see browserLease.js. This source opens its own page in it. ALWAYS a
+      // new page: adopting "the blank tab" by URL grabbed marketplace pages
+      // parked at about:blank between searches (util.js parkPage), and the
+      // sync then navigated — and later closed — a page another source was
+      // actively driving.
       lease = await acquireBrowser();
       context = lease.context;
       watchAuth(context);
-      // Reuse only the context's initial blank tab — any other page belongs
-      // to another lease holder (a marketplace source).
-      const blank = context.pages().find((p) => p.url() === 'about:blank');
-      page = blank ?? (await context.newPage());
+      page = await context.newPage();
       await nav.goToLadder(page);
       if (await looksLoggedOut(page)) {
         throw new Error('Not logged in to Card Ladder — run `npm run login` first.');
@@ -53,6 +59,10 @@ export function createCardLadderSource() {
     },
 
     async refreshAuth() {
+      // Drop the expired token FIRST — refreshAuth is only called after a
+      // 401/403, so lastAuth is non-null and the wait loop below would
+      // otherwise exit immediately, retrying with the same dead token.
+      lastAuth = null;
       await nav.goToLadder(page);
       for (let i = 0; i < 10 && !lastAuth; i++) await page.waitForTimeout(1000);
       if (await looksLoggedOut(page)) {
@@ -102,6 +112,8 @@ export function createCardLadderSource() {
     },
 
     async close() {
+      if (context && onRequest) context.off('request', onRequest);
+      onRequest = null;
       await page?.close().catch(() => {});
       await lease?.release().catch(() => {});
       lease = null;

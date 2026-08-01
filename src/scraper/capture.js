@@ -71,7 +71,9 @@ const slug = (s) => s.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice
 
 // Watches all responses in a browser context. Recognized payloads are pushed
 // to `onPayload`; in discovery mode everything is also dumped to captures/.
-export function attachCapture(context, { discovery = config.discovery, onPayload } = {}) {
+// Only scripts/discover.js calls this (with discovery: true); a normal sync
+// never captures traffic.
+export function attachCapture(context, { discovery = false, onPayload } = {}) {
   let dir = null;
   let counter = 0;
   if (discovery) {
@@ -141,11 +143,4 @@ export function attachCapture(context, { discovery = config.discovery, onPayload
       return { total: seen.length, byHost };
     },
   };
-}
-
-// For payloads the adapter couldn't parse during a real sync.
-export function saveFailure(name, payload) {
-  const dir = path.join(config.capturesDir, 'failures');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, `${slug(name)}.json`), JSON.stringify(payload, null, 2));
 }

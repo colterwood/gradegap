@@ -1,13 +1,15 @@
 // Marketplace watch runner, structured like sync/syncRunner.js: a single
 // in-process manager with a resumable SQLite work queue (one item per
 // watch × source), 409 single-flight, and the same status() surface so the
-// UI polling pattern transfers. On top of that: a setTimeout-chain scheduler
-// (next tick armed only after the previous run fully completes) and the
-// post-run passes — ended auctions, stale fixed listings, and the two
-// aggregate ntfy pushes (new listings / auctions ending soon).
+// UI polling pattern transfers. Sources run concurrently — every HTTP-API
+// source at once, browser sources through a small pool of tabs — with each
+// source pacing its own requests. On top of that: a setTimeout-chain
+// scheduler (next tick armed only after the previous run fully completes)
+// and the post-run passes — ended auctions, stale fixed listings, and the
+// two aggregate ntfy pushes (new listings / auctions ending soon).
 
 import { config } from '../config.js';
-import { buildQueries, scoreListing } from './match.js';
+import { buildQueries, buildWatchTarget, scoreListing } from './match.js';
 import { createMarketplaceSources } from './sources/index.js';
 import { withTimeout } from './sources/util.js';
 import { createFx } from './fx.js';
@@ -46,9 +48,10 @@ export function nextFireDelayMs(times, tz, now = new Date()) {
   return (next - nowMin) * 60_000 - Number(parts.second) * 1000;
 }
 
-// Did a re-sighted listing's price actually go DOWN? Native currency only —
-// comparing across a currency change (or through the USD conversion) would
-// let FX drift fake a "drop" the seller never made. Sub-cent noise ignored.
+// Did a re-sighted listing's price drop ENOUGH to alert on (>= followDropPct
+// of the old price)? Native currency only — comparing across a currency
+// change (or through the USD conversion) would let FX drift fake a "drop"
+// the seller never made.
 // One listing can satisfy several watched cards ("Beam Team Members Only"
 // titles match a plain "Members Only" watch too), but the listings table
 // holds ONE row per (source, listing_id) — so exactly one watch owns it.
@@ -64,12 +67,16 @@ export function isBetterOwner(candidate, existing) {
   return (candidate.specificity ?? 0) > (existing.match_specificity ?? 0);
 }
 
-export function priceDropped(existing, raw) {
+export function priceDropped(existing, raw, minDropPct = config.followDropPct) {
   const oldPrice = existing?.price;
   const newPrice = raw?.price;
   if (oldPrice == null || newPrice == null) return false;
   if ((existing.currency ?? 'USD') !== (raw.currency ?? 'USD')) return false;
-  return newPrice < oldPrice - 0.004;
+  const drop = oldPrice - newPrice;
+  // Alert only on a decrease of at least minDropPct of the old price (default
+  // config.followDropPct) — small seller nudges aren't worth a push. The 1e-9
+  // slack keeps an exact N% drop from failing on float rounding.
+  return drop > 0.004 && drop >= oldPrice * (minDropPct / 100) - 1e-9;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -84,11 +91,21 @@ function toSqlDate(raw) {
   return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 19).replace('T', ' ');
 }
 
-export function createWatchRunner(db, q, { syncManager } = {}) {
+// sourcesFactory: test seam — production always uses the real registry.
+export function createWatchRunner(db, q, { syncManager, sourcesFactory = createMarketplaceSources } = {}) {
   const fx = createFx(q);
+  // A run left 'running' by a crash or restart reads as in-flight forever
+  // (the UI's last-check line never renders again, and its pending items
+  // are orphaned) — finalize it at boot, mirroring the sync runner.
+  {
+    const stale = q.latestStaleWatchRun.get();
+    if (stale) q.finishWatchRun.run({ id: stale.id, status: 'failed', error: 'interrupted by restart' });
+  }
   let running = false;
   let cancelRequested = false;
-  let currentLabel = null;
+  // What each in-flight source is doing right now, keyed by source name —
+  // sources run concurrently, so a single "current" string would clobber.
+  const activeLabels = new Map();
   let lastError = null;
   let donePromise = null;
   let timer = null;
@@ -109,11 +126,20 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
     return siblingCache.get(cardId);
   }
 
+  // One line for the UI's progress bar: the busiest-looking single label,
+  // plus how many other sources are working alongside it.
+  function describeActivity() {
+    const labels = [...activeLabels.values()];
+    if (labels.length === 0) return null;
+    if (labels.length === 1) return labels[0];
+    return `${labels[0]}  (+${labels.length - 1} more source${labels.length === 2 ? '' : 's'})`;
+  }
+
   function status() {
     const run = q.latestWatchRun.get() ?? null;
     return {
       running,
-      currentLabel,
+      currentLabel: describeActivity(),
       lastError,
       run,
       newCount: q.countActiveMatches.get().n,
@@ -214,19 +240,9 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
   });
 
   async function processItem(source, item, watch, runId, runStartedAt) {
-    // Manual watches carry a typed description instead of a Ladder card.
-    const target = watch.description
-      ? { description: watch.description, company: watch.grading_company, grade: watch.grade }
-      : {
-          playerName: watch.player_name ?? watch.card_name,
-          year: watch.year,
-          setName: watch.set_name,
-          cardNumber: watch.card_number,
-          parallel: watch.parallel,
-          company: watch.grading_company,
-          grade: watch.grade,
-          siblingParallels: siblingsFor(watch.card_id),
-        };
+    // Manual watches carry a typed description instead of a Ladder card —
+    // buildWatchTarget (shared with the API routes) handles both shapes.
+    const target = buildWatchTarget(watch, siblingsFor);
     // A user-edited search term replaces the generated queries VERBATIM (no
     // loose fallback — an override means "send exactly this"). Scoring is
     // untouched: results are still verified against the card's identity.
@@ -237,7 +253,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
     // #1"), not year+player — the compressed form looked like a watch that
     // didn't exist ("1997 Michael Jordan" matches four different watches).
     const label = watch.card_name ?? watch.description ?? `${target.year ?? ''} ${target.playerName}`.trim();
-    currentLabel = `${source.name} — ${label} · ${target.company} ${target.grade}`.trim();
+    activeLabels.set(source.name, `${source.name} — ${label} · ${target.company} ${target.grade}`.trim());
 
     // Hard-capped: a wedged site fails this item, never the whole run.
     let raw = await withTimeout(source.search({ text: queries.tight }), 90_000, `${source.name} search`);
@@ -283,6 +299,9 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
       await withTimeout(source.start({ q, db }), 60_000, `${source.name} start`);
     } catch (err) {
       lastError = String(err?.message ?? err);
+      // A start can fail half-done (browser lease acquired, page creation
+      // failed) — close so a leaked lease can't hold Chromium open.
+      try { await source.close(); } catch { /* partial start */ }
       return failAll(lastError);
     }
 
@@ -290,7 +309,12 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
       for (const item of items) {
         if (cancelRequested) return;
         const watch = watchById.get(item.watch_id);
-        if (!watch || !watch.enabled) {
+        // Existence/enabled comes from a LIVE lookup, not the run-start
+        // snapshot: a watch deleted mid-run otherwise FK-failed every
+        // remaining source, and disabling mid-run never took effect. The
+        // snapshot still supplies the joined card/player fields.
+        const live = q.getWatch.get(item.watch_id);
+        if (!watch || !live?.enabled) {
           q.markWatchItem.run({ id: item.id, status: 'done', error: null });
           q.bumpWatchRunProgress.run({ id: runId, failedDelta: 0 });
           continue;
@@ -319,9 +343,14 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
           q.markWatchItem.run({ id: item.id, status: 'failed', error: msg });
           q.bumpWatchRunProgress.run({ id: runId, failedDelta: 1 });
         }
-        if (source.minIntervalMs > 0) await sleep(source.minIntervalMs + jitter());
+        // No pacing debt after the FINAL item — the old tail sleep held the
+        // browser lease (and the lane) for up to 8s doing nothing.
+        if (source.minIntervalMs > 0 && item !== items[items.length - 1]) {
+          await sleep(source.minIntervalMs + jitter());
+        }
       }
     } finally {
+      activeLabels.delete(source.name);
       try { await source.close(); } catch { /* already closing */ }
     }
   }
@@ -340,7 +369,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
         message: `${plural(fresh.length, 'new listing')} for your watched cards — open the app for details`,
         clickUrl: watchedUrl,
       });
-      if (ok) for (const l of fresh) q.setListingStatus.run('notified', l.id);
+      if (ok) db.transaction(() => { for (const l of fresh) q.setListingStatus.run('notified', l.id); })();
     }
 
     const hours = Math.round(config.watchRemindMin / 60);
@@ -352,7 +381,7 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
         clickUrl: watchedUrl,
         priority: 'high',
       });
-      if (ok) for (const l of ending) q.markListingReminded.run(l.id);
+      if (ok) db.transaction(() => { for (const l of ending) q.markListingReminded.run(l.id); })();
     }
 
     // --- Following-tab alerts: per-item ntfy (deep link to the listing)
@@ -404,46 +433,65 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
   // exclude it, so quota spend is exactly runs/day × watches × marketplaces.
   async function start({ trigger = 'manual', only = null, exclude = null } = {}) {
     if (running) throw Object.assign(new Error('watch check already running'), { code: 409 });
-    const watches = q.listEnabledWatches.all();
-    if (watches.length === 0) {
-      throw Object.assign(new Error('no watched cards — flag cards in the results table first'), { code: 400 });
-    }
-    const allSources = await createMarketplaceSources();
-    if (allSources.length === 0) {
-      throw Object.assign(new Error('no watch sources configured (WATCH_SOURCES)'), { code: 400 });
-    }
-    // A source missing its setup (e.g. eBay without API keys) is skipped
-    // with a reason instead of failing every watch against it.
-    let sources = [];
-    skippedSources = [];
-    for (const s of allSources) {
-      if (only && !only.includes(s.name)) continue;
-      if (exclude && exclude.includes(s.name)) continue;
-      const reason = s.configured?.() ?? null;
-      if (reason) skippedSources.push({ name: s.name, reason });
-      else sources.push(s);
-    }
-    // Most-productive sources first (config.watchSourceOrder) so a long run
-    // surfaces new listings early instead of after the thin auction houses.
-    sources = orderSources(sources);
-    if (sources.length === 0) {
-      const detail = skippedSources.map((s) => `${s.name}: ${s.reason}`).join(' · ');
-      throw Object.assign(
-        new Error(`no usable watch sources — ${detail}. Sources needing no setup: fanatics, comc, hibid, heritage, myslabs, pristine, goldin, cia, classic, miller, catawiki (set WATCH_SOURCES in .env).`),
-        { code: 400 }
-      );
-    }
-
-    const runId = Number(q.createWatchRun.run(trigger).lastInsertRowid);
-    for (const source of sources) {
-      for (const watch of watches) q.insertWatchItem.run(runId, watch.id, source.name);
-    }
-    q.updateWatchRunTotals.run({ id: runId, total: watches.length * sources.length });
-
+    // Claim the flight NOW, before any await: createMarketplaceSources
+    // crosses a macrotask boundary on first use, and two near-simultaneous
+    // starts (a double-clicked Check Now, or a manual check racing a
+    // scheduler tick) both passed the old check-then-set guard and ran two
+    // full concurrent checks. Any pre-run failure releases the claim.
     running = true;
+    let sources, watches, runId;
+    try {
+      watches = q.listEnabledWatches.all();
+      if (watches.length === 0) {
+        throw Object.assign(new Error('no watched cards — flag cards in the results table first'), { code: 400 });
+      }
+      const allSources = await sourcesFactory();
+      if (allSources.length === 0) {
+        throw Object.assign(new Error('no watch sources configured (WATCH_SOURCES)'), { code: 400 });
+      }
+      // A source missing its setup (e.g. eBay without API keys) is skipped
+      // with a reason instead of failing every watch against it.
+      sources = [];
+      skippedSources = [];
+      for (const s of allSources) {
+        if (only && !only.includes(s.name)) continue;
+        if (exclude && exclude.includes(s.name)) continue;
+        const reason = s.configured?.() ?? null;
+        if (reason) skippedSources.push({ name: s.name, reason });
+        else sources.push(s);
+      }
+      // Most-productive sources first (config.watchSourceOrder) so a long run
+      // surfaces new listings early instead of after the thin auction houses.
+      sources = orderSources(sources);
+      if (sources.length === 0) {
+        const detail = skippedSources.map((s) => `${s.name}: ${s.reason}`).join(' · ');
+        throw Object.assign(
+          new Error(`no usable watch sources — ${detail}. Sources needing no setup: fanatics, comc, hibid, heritage, myslabs, pristine, goldin, cia, classic, miller, catawiki (set WATCH_SOURCES in .env).`),
+          { code: 400 }
+        );
+      }
+
+      // One transaction for the whole enqueue — watches × sources rows as
+      // individual commits stalled the Check Now button for seconds.
+      runId = db.transaction(() => {
+        const id = Number(q.createWatchRun.run(trigger).lastInsertRowid);
+        for (const source of sources) {
+          for (const watch of watches) q.insertWatchItem.run(id, watch.id, source.name);
+        }
+        q.updateWatchRunTotals.run({ id, total: watches.length * sources.length });
+        return id;
+      })();
+    } catch (err) {
+      running = false;
+      throw err;
+    }
+
     cancelRequested = false;
     lastError = null;
     priceDrops = [];
+    // Siblings change whenever a sync lands new parallels; this cache used
+    // to live for the whole process, gating matches with stale sibling sets.
+    siblingCache.clear();
 
     donePromise = (async () => {
       try {
@@ -456,26 +504,49 @@ export function createWatchRunner(db, q, { syncManager } = {}) {
           if (!bySource.has(item.source)) bySource.set(item.source, []);
           bySource.get(item.source).push(item);
         }
-        // Priority order (already applied to `sources` above) — the old
-        // per-run rotation meant a run could spend its first hours on the
-        // thinnest auction houses while eBay sat queued at the back.
-        for (const source of sources) {
-          if (cancelRequested) break;
-          if (!bySource.has(source.name)) continue;
-          await processSource(source, bySource.get(source.name), watchById, runId, runStartedAt);
-        }
+        // Sources run CONCURRENTLY, not in sequence — each source already
+        // paces itself (minIntervalMs between its own requests), so nothing
+        // about politeness changes; the run just stops paying for the sum of
+        // every source's pacing. HTTP-API sources are fully independent and
+        // all start at once. Browser sources share the one Chromium profile,
+        // so they draw from a priority-ordered queue with a small pool of
+        // tabs (config.watchBrowserConcurrency; 1 = the old serial chain).
+        // Wall clock falls from sum(all sources) to max(slowest HTTP source,
+        // browser queue / pool width).
+        const runSource = (source) =>
+          processSource(source, bySource.get(source.name), watchById, runId, runStartedAt);
+        const httpSources = sources.filter((s) => !s.needsBrowser && bySource.has(s.name));
+        const browserQueue = sources.filter((s) => s.needsBrowser && bySource.has(s.name));
+        const tabCount = Math.max(1, Math.min(config.watchBrowserConcurrency, browserQueue.length));
+        const browserLane = async () => {
+          while (browserQueue.length > 0 && !cancelRequested) {
+            await runSource(browserQueue.shift());
+          }
+        };
+        // allSettled so one source's unexpected crash can't strand the others
+        // mid-flight; the first failure still fails the run afterwards.
+        const settled = await Promise.allSettled([
+          ...httpSources.map((s) => runSource(s)),
+          ...Array.from({ length: tabCount }, () => browserLane()),
+        ]);
+        const crashed = settled.find((r) => r.status === 'rejected');
+        if (crashed) throw crashed.reason;
 
         q.deleteEndedAuctions.run();
         q.deleteStaleListings.run();
         await notifyAfterRun();
 
         q.finishWatchRun.run({ id: runId, status: cancelRequested ? 'cancelled' : 'completed', error: null });
+        // Nothing reads history past the latest runs; stop it growing forever
+        // (watches × sources rows per run, several runs a day).
+        q.pruneOldWatchItems.run();
+        q.pruneOldWatchRuns.run();
       } catch (err) {
         lastError = String(err?.message ?? err);
         q.finishWatchRun.run({ id: runId, status: 'failed', error: lastError });
       } finally {
         running = false;
-        currentLabel = null;
+        activeLabels.clear();
       }
     })();
 

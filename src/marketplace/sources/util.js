@@ -7,6 +7,24 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// SHOPIFY_SHOPS / WOO_SHOPS entries: "domain[:CUR]", tolerant of pasted
+// URLs. The protocol must be stripped BEFORE splitting on ':' — an
+// "https://shop.com" entry used to split into domain "https" and every
+// request silently targeted https://https/. Currency is the part after the
+// last colon only when it looks like a 3-letter code.
+export function parseShopList(entries, defaultCurrency = 'CAD') {
+  return entries.map((entry) => {
+    const bare = String(entry).replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    const m = bare.match(/^(.*):([A-Za-z]{3})$/);
+    return {
+      domain: m ? m[1] : bare,
+      currency: (m ? m[2] : defaultCurrency).toUpperCase(),
+    };
+  });
+}
+
 export const BROWSER_HEADERS = {
   'user-agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
@@ -32,13 +50,6 @@ export async function fetchWithTimeout(url, { timeoutMs = 20_000, headers, ...op
   } finally {
     clearTimeout(t);
   }
-}
-
-export async function fetchJson(url, opts = {}) {
-  const res = await fetchWithTimeout(url, opts);
-  if (res.status === 429) throw Object.assign(new Error(`rate limited (HTTP 429): ${url}`), { rateLimited: true });
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
-  return res.json();
 }
 
 export async function fetchHtml(url, opts = {}) {

@@ -72,8 +72,16 @@ export function createMillerSource() {
       const params = new URLSearchParams({ keyword: text, terms: text, sort: 'lot_number', page: '1' });
       const html = await fetchHtml(`${SITE}/lots?${params}`);
       const vv = extractViewVars(html);
+      // A missing viewVars blob is a parse failure (markup change or an
+      // interstitial), not an empty catalog — "between auctions" still
+      // renders viewVars with an empty result_page. Fail visibly so the
+      // Sources tab shows it instead of healthy zeros forever.
+      if (vv == null) {
+        saveDebug('miller', 'lots-page', html, 'html');
+        throw new Error('miller: viewVars blob not found on /lots — markup changed?');
+      }
       const lots = parseMillerLots(vv);
-      debugLog('miller', `viewVars found: ${vv ? 'yes' : 'NO'}; lots in page: ${lots.length}`);
+      debugLog('miller', `lots in page: ${lots.length}`);
       if (lots.length === 0) saveDebug('miller', 'lots-page', html, 'html');
       // If the server ignored the keyword params we get the whole catalog —
       // filter locally so the match layer isn't flooded.

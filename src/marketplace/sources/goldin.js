@@ -40,8 +40,10 @@ export function parseGoldinLots(body, cloudFront, listingType = 'auction') {
       (v) => typeof v === 'string' && v.includes('/item/')
     );
     let imageUrl = lot.primary_image_name ?? null;
-    if (imageUrl && !/^https?:/.test(imageUrl) && cloudFront) {
-      imageUrl = `${cloudFront.replace(/\/+$/, '')}/public/Lots/${id}/${imageUrl}`;
+    if (imageUrl && !/^https?:/.test(imageUrl)) {
+      // Bare filenames are only usable with the CDN base; without it, a
+      // relative name would be stored verbatim and render as a broken image.
+      imageUrl = cloudFront ? `${cloudFront.replace(/\/+$/, '')}/public/Lots/${id}/${imageUrl}` : null;
     }
     out.push({
       listingId: String(id),

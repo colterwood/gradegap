@@ -428,3 +428,72 @@ test('half grades and Authentic are matched exactly', () => {
   assert.ok(slabRegex('PSA', 'Authentic').test('1986 fleer jordan PSA AUTH'));
   assert.ok(!slabRegex('PSA', 'Authentic').test('1986 fleer jordan psa 10'));
 });
+
+test('generational suffixes: the required surname skips Jr./II', () => {
+  const griffey = {
+    playerName: 'Ken Griffey Jr.', year: 1989, setName: 'Upper Deck',
+    cardNumber: '1', parallel: null, company: 'PSA', grade: '10',
+  };
+  // Sellers routinely omit the suffix — the real surname must carry the gate.
+  assert.equal(scoreListing(griffey, '1989 Upper Deck Ken Griffey Rookie #1 PSA 10').ok, true);
+  // And "jr" alone must NOT satisfy the gate for a different "... Jr." player.
+  const trent = {
+    playerName: 'Gary Trent Jr.', year: 2018, setName: 'Panini Prizm',
+    cardNumber: '269', parallel: null, company: 'PSA', grade: '10',
+  };
+  const jackson = {
+    playerName: 'Jaren Jackson Jr.', year: 2018, setName: 'Panini Prizm',
+    cardNumber: '265', parallel: null, company: 'PSA', grade: '10',
+  };
+  const trentTitle = '2018-19 Panini Prizm Gary Trent Jr. #269 PSA 10';
+  assert.equal(scoreListing(trent, trentTitle).ok, true);
+  assert.equal(scoreListing(jackson, trentTitle).ok, false);
+});
+
+test('yearRegex: the second year of a full season range is not this year', () => {
+  assert.ok(!yearRegex(2018).test('2017-2018 Panini Prizm Luka'));
+  assert.ok(!yearRegex(1987).test('1986-1987 Fleer Jordan'));
+  // The first year of the range still is, in every format.
+  assert.ok(yearRegex(2017).test('2017-2018 Panini Prizm Luka'));
+  assert.ok(yearRegex(1986).test('1986-1987 Fleer Jordan'));
+  assert.ok(yearRegex(1986).test('1986-87 Fleer Jordan'));
+});
+
+test('manual watch: a single-digit card number is required, not dropped', () => {
+  const target = { description: '1986 Fleer Sticker Michael Jordan #8', company: 'PSA', grade: '9' };
+  assert.equal(scoreListing(target, '1986 Fleer Sticker Michael Jordan #8 PSA 9').ok, true);
+  // "#11" tokenizes to "11", so requiring "8" correctly rejects it.
+  assert.equal(scoreListing(target, '1986 Fleer Sticker Michael Jordan #11 PSA 9').ok, false);
+});
+
+test('punctuated and padded card numbers can still hit the number component', () => {
+  const mja = {
+    playerName: 'Michael Jordan', year: 2006, setName: 'Fleer',
+    cardNumber: 'MJA-2', parallel: null, company: 'PSA', grade: '8',
+  };
+  // Real Heritage-style title: the raw string "mja-2" never appears as one token.
+  const r = scoreListing(mja, '2006 Fleer Michael Jordan #MJA-2 PSA NM-MT 8');
+  assert.equal(r.ok, true);
+  assert.ok(r.debug.matched.some((m) => m.startsWith('number:')), JSON.stringify(r.debug));
+  assert.equal(r.score, 1);
+  const padded = { ...mja, cardNumber: ' 11' };
+  const r2 = scoreListing(padded, '2006 Fleer Michael Jordan #11 PSA 8');
+  assert.ok(r2.debug.matched.some((m) => m.startsWith('number:')));
+});
+
+test('ungraded watch rejects non-half decimals and the short Auth form', () => {
+  const target = { description: 'Pokemon Charizard', company: 'None', grade: 'Raw' };
+  assert.equal(scoreListing(target, '1999 Pokemon Charizard CGC 9.8').ok, false);
+  assert.equal(scoreListing(target, 'Pokemon Charizard PSA Auth').ok, false);
+  assert.equal(scoreListing(target, '1999 Pokemon Charizard raw sharp').ok, true);
+});
+
+test('buildQueries: catalog-only parallel words are dropped from the tight query', () => {
+  const q = buildQueries({
+    playerName: 'Tom Brady', year: 2000, setName: 'Fleer Showcase',
+    cardNumber: '20', parallel: 'Base /1000', company: 'BGS', grade: '8',
+  });
+  assert.equal(q.tight, '2000 Fleer Showcase Tom Brady /1000 BGS 8');
+  const q2 = buildQueries({ ...luka, parallel: 'Base' });
+  assert.equal(q2.tight, '2018 Prizm Luka Doncic PSA 10');
+});

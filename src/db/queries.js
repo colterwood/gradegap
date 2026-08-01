@@ -7,6 +7,7 @@ export function makeQueries(db) {
     INSERT INTO cards (player_id, cl_card_id, name, set_name, year, card_number, parallel, cl_url, raw_json)
     VALUES (@playerId, @clCardId, @name, @setName, @year, @cardNumber, @parallel, @clUrl, @rawJson)
     ON CONFLICT(cl_card_id) DO UPDATE SET
+      player_id = COALESCE(excluded.player_id, player_id),
       name = excluded.name,
       set_name = excluded.set_name,
       year = excluded.year,
@@ -333,6 +334,17 @@ export function makeQueries(db) {
       LEFT JOIN players p ON p.id = c.player_id
       WHERE w.enabled = 1
     `),
+    // Same shape for ONE watch, enabled or not — hand-pinning a listing to a
+    // disabled watch must still score the real pairing, not record a 0.
+    getWatchTarget: db.prepare(`
+      SELECT w.id, w.card_id, w.grading_company, w.grade, w.description,
+             COALESCE(c.name, w.description) AS card_name,
+             c.set_name, c.year, c.card_number, c.parallel, p.name AS player_name
+      FROM watches w
+      LEFT JOIN cards c ON c.id = w.card_id
+      LEFT JOIN players p ON p.id = c.player_id
+      WHERE w.id = ?
+    `),
     // A re-sighting refreshes the live fields and resets the staleness
     // counter. url is refreshed too, so rows stored before an adapter's
     // link format was corrected get repaired on the next check.
@@ -436,6 +448,14 @@ export function makeQueries(db) {
     getWatchRun: db.prepare(`SELECT * FROM watch_check_runs WHERE id = ?`),
     latestWatchRun: db.prepare(`SELECT * FROM watch_check_runs ORDER BY id DESC LIMIT 1`),
     latestStaleWatchRun: db.prepare(`SELECT * FROM watch_check_runs WHERE status = 'running' ORDER BY id DESC LIMIT 1`),
+    // Check history past the last 20 runs is never read by anything — every
+    // stats/failure query takes a single (latest) run id — so prune it.
+    pruneOldWatchItems: db.prepare(`
+      DELETE FROM watch_check_items WHERE run_id <= (SELECT COALESCE(MAX(id), 0) - 20 FROM watch_check_runs)
+    `),
+    pruneOldWatchRuns: db.prepare(`
+      DELETE FROM watch_check_runs WHERE id <= (SELECT COALESCE(MAX(id), 0) - 20 FROM watch_check_runs)
+    `),
     updateWatchRunTotals: db.prepare(`UPDATE watch_check_runs SET items_total = @total WHERE id = @id`),
     bumpWatchRunProgress: db.prepare(`
       UPDATE watch_check_runs SET items_processed = items_processed + 1,

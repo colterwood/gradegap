@@ -76,22 +76,33 @@ export function createCatawikiSource() {
           if (search.status !== 200 || !search.json) return { status: search.status, lots: null };
           const lots = (search.json.lots ?? []).slice(0, 60);
           let bidding = {};
+          let biddingStatus = 200;
           if (lots.length) {
             const ids = lots.map((l) => l.id).join(',');
             const b = await getJson(`/buyer/api/v3/bidding/lots?ids=${ids}`);
+            biddingStatus = b.status;
             for (const bl of b.json?.lots ?? []) bidding[bl.id] = bl;
           }
-          return { status: 200, lots, bidding };
+          return { status: 200, lots, bidding, biddingStatus };
         } catch (e) {
           return { status: 0, lots: null, error: String(e) };
         }
       }, text);
-      if (res.status === 429) throw Object.assign(new Error('Catawiki rate limited (429)'), { rateLimited: true });
+      if (res.status === 429 || res.biddingStatus === 429) {
+        throw Object.assign(new Error('Catawiki rate limited (429)'), { rateLimited: true });
+      }
       if (res.status !== 200 || !res.lots) {
         saveDebug('catawiki', 'page', await page.content().catch(() => ''), 'html');
         const shot = await page.screenshot().catch(() => null);
         if (shot) saveDebug('catawiki', 'screenshot', shot, 'png');
         throw new Error(`Catawiki search failed (HTTP ${res.status || 'none'}${res.error ? ` — ${res.error}` : ''})`);
+      }
+      // The bidding call is the POINT of the second request — price, end
+      // time, closed state. A challenged/failed bidding response used to
+      // degrade every lot silently: null prices (bypassing max-price caps,
+      // overwriting known prices), closed lots stored, buy-nows mislabeled.
+      if (res.lots.length > 0 && res.biddingStatus !== 200) {
+        throw new Error(`Catawiki bidding lookup failed (HTTP ${res.biddingStatus || 'none'}) — refusing to store priceless lots`);
       }
       debugLog('catawiki', `search returned ${res.lots.length} lots`);
       return parseCatawikiLots(res.lots, res.bidding);

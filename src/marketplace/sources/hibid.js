@@ -132,7 +132,15 @@ export function createHibidSource() {
       );
       if (res.status === 429) throw Object.assign(new Error('HiBid rate limited (429)'), { rateLimited: true });
       if (res.status !== 200 || !res.body) throw new Error(`HiBid GraphQL failed (HTTP ${res.status || 'none'})`);
-      return parseHibidResults(res.body?.data?.lotSearch?.pagedResults?.results);
+      // GraphQL failures arrive as HTTP 200 with an errors array and no
+      // data — indistinguishable from "no lots" unless checked, and three
+      // such "successful" empty checks delete tracked listings as stale.
+      if (res.body.errors?.length) {
+        throw new Error(`HiBid GraphQL error: ${res.body.errors[0]?.message ?? 'unknown'}`);
+      }
+      const paged = res.body.data?.lotSearch?.pagedResults;
+      if (!paged) throw new Error('HiBid GraphQL: no lotSearch data in response (schema changed?)');
+      return parseHibidResults(paged.results);
     },
 
     async close() {

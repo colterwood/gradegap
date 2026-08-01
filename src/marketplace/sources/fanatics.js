@@ -105,9 +105,14 @@ export function parseFanaticsAlgoliaHit(hit) {
   const dollarKeys = isAuction
     ? ['currentBid', 'currentPrice', 'highestBid', 'startingBid', 'startingPrice', 'lowestPrice', 'price']
     : ['buyNowPrice', 'askingPrice', 'currentPrice', 'lowestPrice', 'price'];
+  // Same 0-falls-through rule as the dollar loop below: a 0 current bid is
+  // provisional, and breaking on it would skip startingPriceInCents — the
+  // exact "$0 auction" the comment below exists to prevent.
   let price = null;
   for (const k of centsKeys) {
-    if (hit[k] != null) { price = centsToDollars(toNumber(hit[k])); break; }
+    const v = hit[k] != null ? centsToDollars(toNumber(hit[k])) : null;
+    if (v != null && v > 0) { price = v; break; }
+    if (v != null && price == null) price = v;
   }
   if (price == null || price === 0) {
     for (const k of dollarKeys) {

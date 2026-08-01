@@ -8,9 +8,10 @@
 // ("12500" + currency_minor_unit 2 = $125.00).
 
 import { config } from '../../config.js';
-import { fetchWithTimeout, fetchHtml, decodeEntities, debugLog, saveDebug, toNumber, absUrl } from './util.js';
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+import {
+  fetchWithTimeout, fetchHtml, decodeEntities, debugLog, saveDebug, toNumber, absUrl,
+  parseShopList, sleep,
+} from './util.js';
 
 // Pure, fixture-testable: Store API products → normalized raw listings.
 export function parseWooProducts(products, { domain, currency }) {
@@ -98,14 +99,20 @@ export async function searchWooShop({ domain, currency = 'CAD' }, text) {
     // The Store API is authoritative when it answers — including an empty
     // result, which means "this shop has nothing matching", NOT "broken".
     // (Falling back on empty scraped the storefront's "no results, here's
-    // our catalog" grid and returned dozens of unrelated cards.)
+    // our catalog" grid and returned dozens of unrelated cards.) But a 200
+    // whose body ISN'T a JSON array is not the API answering — caching
+    // plugins and maintenance pages serve 200 HTML on /wp-json routes — so
+    // that falls through to the HTML search instead of counting as empty.
     const body = await res.json().catch(() => null);
-    const products = Array.isArray(body) ? body : [];
-    const mapped = parseWooProducts(products, { domain, currency });
-    debugLog('woocommerce', `${domain} Store API → HTTP ${res.status}, ${products.length} products, ${mapped.length} mapped`);
-    return mapped;
+    if (Array.isArray(body)) {
+      const mapped = parseWooProducts(body, { domain, currency });
+      debugLog('woocommerce', `${domain} Store API → HTTP ${res.status}, ${body.length} products, ${mapped.length} mapped`);
+      return mapped;
+    }
+    debugLog('woocommerce', `${domain} Store API → HTTP 200 but non-array body; falling back to product search page`);
+  } else {
+    debugLog('woocommerce', `${domain} Store API → HTTP ${res.status}; falling back to product search page`);
   }
-  debugLog('woocommerce', `${domain} Store API → HTTP ${res.status}; falling back to product search page`);
 
   // Store API missing/empty — try the storefront's own search.
   const html = await fetchHtml(`https://${domain}/?s=${encodeURIComponent(text)}&post_type=product`);
@@ -116,13 +123,7 @@ export async function searchWooShop({ domain, currency = 'CAD' }, text) {
 }
 
 export function createWooSource() {
-  const shops = config.wooShops.map((entry) => {
-    const [domain, cur] = entry.split(':');
-    return {
-      domain: domain.replace(/^https?:\/\//, '').replace(/\/+$/, ''),
-      currency: (cur || 'CAD').toUpperCase(),
-    };
-  });
+  const shops = parseShopList(config.wooShops);
 
   return {
     name: 'woocommerce',

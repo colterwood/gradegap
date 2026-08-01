@@ -6,19 +6,19 @@
 // memory and in source_state so restarts don't re-mint.
 
 import { config } from '../../config.js';
+import { fetchWithTimeout } from './util.js';
 
 const HOSTS = {
   production: 'https://api.ebay.com',
   sandbox: 'https://api.sandbox.ebay.com',
 };
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 export function createEbaySource() {
   const host = HOSTS[config.ebayEnv] ?? HOSTS.production;
   let q = null;
   let token = null;
   let tokenExpMs = 0;
+  let minting = null; // single-flight: parallel 401s must not mint 6 tokens
 
   function loadCachedToken() {
     const row = q?.getSourceState.get('ebay');
@@ -36,23 +36,27 @@ export function createEbaySource() {
 
   async function ensureToken(force = false) {
     if (!force && token && tokenExpMs > Date.now() + 60_000) return token;
-    const res = await fetch(`${host}/identity/v1/oauth2/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization:
-          'Basic ' + Buffer.from(`${config.ebayClientId}:${config.ebayClientSecret}`).toString('base64'),
-      },
-      body: 'grant_type=client_credentials&scope=' + encodeURIComponent('https://api.ebay.com/oauth/api_scope'),
-    });
-    if (!res.ok) {
-      throw new Error(`eBay OAuth failed (HTTP ${res.status}) — check EBAY_CLIENT_ID / EBAY_CLIENT_SECRET`);
-    }
-    const body = await res.json();
-    token = body.access_token;
-    tokenExpMs = Date.now() + (body.expires_in ?? 7200) * 1000;
-    q?.setSourceAuth.run(JSON.stringify({ token, expMs: tokenExpMs }), 'ebay');
-    return token;
+    minting ??= (async () => {
+      const res = await fetchWithTimeout(`${host}/identity/v1/oauth2/token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization:
+            'Basic ' + Buffer.from(`${config.ebayClientId}:${config.ebayClientSecret}`).toString('base64'),
+        },
+        body: 'grant_type=client_credentials&scope=' + encodeURIComponent('https://api.ebay.com/oauth/api_scope'),
+        timeoutMs: 15_000,
+      });
+      if (!res.ok) {
+        throw new Error(`eBay OAuth failed (HTTP ${res.status}) — check EBAY_CLIENT_ID / EBAY_CLIENT_SECRET`);
+      }
+      const body = await res.json();
+      token = body.access_token;
+      tokenExpMs = Date.now() + (body.expires_in ?? 7200) * 1000;
+      q?.setSourceAuth.run(JSON.stringify({ token, expMs: tokenExpMs }), 'ebay');
+      return token;
+    })().finally(() => { minting = null; });
+    return minting;
   }
 
   async function searchMarketplace(text, marketplace) {
@@ -62,12 +66,15 @@ export function createEbaySource() {
     // provides the precision.
     if (marketplace === 'EBAY_US' || marketplace === 'EBAY_CA') params.set('category_ids', '212');
 
+    // fetchWithTimeout, not bare fetch: a hung connection must fail in 15s
+    // like every other source, not burn the runner's whole 90s item budget.
     const doFetch = () =>
-      fetch(`${host}/buy/browse/v1/item_summary/search?${params}`, {
+      fetchWithTimeout(`${host}/buy/browse/v1/item_summary/search?${params}`, {
         headers: {
           Authorization: `Bearer ${token}`,
           'X-EBAY-C-MARKETPLACE-ID': marketplace,
         },
+        timeoutMs: 15_000,
       });
 
     let res = await doFetch();
@@ -109,9 +116,15 @@ export function createEbaySource() {
     },
 
     async search({ text }) {
+      // All marketplaces AT ONCE: parallel fan-out changes burst, not daily
+      // API call counts, and drops the per-item cost from ~6 serial round
+      // trips plus sleeps to one slow round trip. Results keep marketplace
+      // order, so dedupe still prefers the earlier-listed marketplace.
+      const perMarket = await Promise.all(
+        config.ebayMarketplaces.map((m) => searchMarketplace(text, m))
+      );
       const out = new Map();
-      for (const marketplace of config.ebayMarketplaces) {
-        const items = await searchMarketplace(text, marketplace);
+      for (const items of perMarket) {
         for (const item of items) {
           // itemId is "v1|<legacyId>|<variation>"; the legacy id is stable
           // across marketplaces and is our cross-marketplace/-source dedupe key.
@@ -132,7 +145,6 @@ export function createEbaySource() {
             seller: item.seller?.username ?? null,
           });
         }
-        if (config.ebayMarketplaces.length > 1) await sleep(300);
       }
       return [...out.values()];
     },

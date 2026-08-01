@@ -10,6 +10,10 @@ export function openDb(dbPath = path.join(config.dataDir, 'gradegap.db')) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
+  // Under WAL, NORMAL skips the per-commit fsync (worst case on power loss
+  // is losing the last transaction, never corruption) — the sync crawl and
+  // watch runs commit per card/listing, so FULL cost minutes per crawl.
+  db.pragma('synchronous = NORMAL');
   // Table rebuilds run BEFORE schema.sql (whose indexes assume the new
   // shape) and before foreign_keys is switched on.
   migrateWatchesForManual(db);

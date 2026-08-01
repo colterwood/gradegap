@@ -1,6 +1,5 @@
 const state = {
   basis: 'cl_value',
-  direction: 'all',
   maxPrice: 0, // 0 = no cap
   minDiff: 200, // matches the input's default value in index.html
   minPctDiff: 15, // matches the input's default value in index.html
@@ -30,6 +29,12 @@ const fmtMoney = (n) =>
 // they go through innerHTML.
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// Scraped URLs must be http(s) before they become clickable: adapters
+// resolve raw hrefs from marketplace pages, and new URL('javascript:…',
+// site) KEEPS the scheme — esc() stops attribute breakout but a javascript:
+// href would still execute in this page's origin on click.
+const safeHref = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : null);
 
 // Card Ladder dates arrive as ISO (2026-05-06T10:00:00.000Z); show just the day.
 const fmtDate = (s) => (s ? String(s).slice(0, 10) : '—');
@@ -80,6 +85,7 @@ const watchKey = (cardId, grader, grade) => `${cardId}|${grader}|${grade}`;
 
 let pollTimer = null;
 let wasRunning = false;
+let lastSyncReload = { processed: -1, at: 0 };
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -110,7 +116,6 @@ async function loadResults() {
 
   const params = new URLSearchParams({
     basis: state.basis,
-    direction: state.direction,
     maxPrice: state.maxPrice,
     minDiff: state.minDiff,
     minPctDiff: state.minPctDiff,
@@ -178,14 +183,15 @@ function renderResults() {
   for (const row of rows) {
     const tr = document.createElement('tr');
     const diffClass = row.abs_diff >= 0 ? 'pos' : 'neg';
-    const link = row.cl_url
-      ? `<a href="${esc(row.cl_url)}" target="_blank" rel="noopener">${esc(row.name)}</a>`
+    const clHref = safeHref(row.cl_url);
+    const link = clHref
+      ? `<a href="${esc(clHref)}" target="_blank" rel="noopener">${esc(row.name)}</a>`
       : esc(row.name);
     const watched = isWatched(row);
     tr.innerHTML = `
       <td class="watch-cell"><input type="checkbox" class="watch-cb" ${watched ? 'checked' : ''}
         data-card-id="${row.card_id}" data-grader="${esc(row.grader)}" data-grade="${esc(row.grade)}" /></td>
-      <td class="dot-cell"><span class="dot dot-${row._dot.color}" title="${row._dot.title}"></span></td>
+      <td class="dot-cell"><span class="dot dot-${row._dot.color}" title="${esc(row._dot.title)}"></span></td>
       <td>${link}</td>
       <td class="num grade-cell">${row.grade ?? '—'}</td>
       <td class="grade-cell">${row.grader ?? '—'}</td>
@@ -216,7 +222,7 @@ function renderResults() {
     } else if (currentRows.length > 0) {
       emptyEl.textContent = 'All rows are hidden by the current Liquidity filter.';
     } else if (lastMeta.missing.length > 0) {
-      emptyEl.innerHTML = `No ${lastMeta.missing.join(' or ')} vs PSA data synced yet — hit <strong>Sync</strong> to pull it.`;
+      emptyEl.innerHTML = `No ${lastMeta.missing.map(esc).join(' or ')} vs PSA data synced yet — hit <strong>Sync</strong> to pull it.`;
     } else {
       emptyEl.innerHTML = 'No matching cards — hit <strong>Sync</strong> to pull data from Card Ladder, or loosen the filters.';
     }
@@ -276,7 +282,7 @@ async function refreshStatus() {
 
   if (!s.running && s.run) {
     if (s.run.status === 'completed') {
-      const failed = s.run.cards_failed ? ` (${s.run.cards_failed} failed — see captures/failures/)` : '';
+      const failed = s.run.cards_failed ? ` (${s.run.cards_failed} failed)` : '';
       $('sync-info').textContent = `Last synced ${s.run.finished_at} UTC${failed}`;
     } else if (s.run.status === 'failed') {
       setError(`Last sync failed: ${s.run.error ?? 'unknown error'}`);
@@ -285,9 +291,19 @@ async function refreshStatus() {
     }
   }
 
-  // Refresh the table live while a sync runs so cards visibly accumulate,
-  // and once more when it finishes.
-  if (s.running || (wasRunning && !s.running)) {
+  // Refresh the table while a sync runs so cards visibly accumulate — but
+  // not on every 2s tick: refetching and re-rendering up to 5,000 rows per
+  // tick pinned the server and shuffled sorted rows under the cursor (a
+  // click aimed at one row's checkbox could land on a different card).
+  // Reload only when progress advanced, at most every 10s — plus once more
+  // at the finish.
+  const processed = s.run?.cards_processed ?? 0;
+  const finishing = wasRunning && !s.running;
+  if (
+    finishing ||
+    (s.running && processed !== lastSyncReload.processed && Date.now() - lastSyncReload.at >= 10_000)
+  ) {
+    lastSyncReload = { processed, at: Date.now() };
     await loadResults().catch(() => {});
   }
   if (wasRunning && !s.running) {
@@ -364,29 +380,23 @@ async function loadPlayers() {
   }
 }
 
-function wireToggle(id, key) {
+function wireToggle(id, key, onChange = () => loadResults().catch((err) => setError(err.message))) {
   $(id).addEventListener('click', (e) => {
     const btn = e.target.closest('button');
     if (!btn) return;
     for (const b of $(id).querySelectorAll('button')) b.classList.toggle('active', b === btn);
     state[key] = btn.dataset.value;
-    loadResults().catch((err) => setError(err.message));
+    onChange();
   });
 }
 
 wireToggle('basis-toggle', 'basis');
-
 // Watched/unwatched is a client-side view of rows already loaded.
-$('watch-filter').addEventListener('click', (e) => {
-  const btn = e.target.closest('button');
-  if (!btn) return;
-  for (const b of $('watch-filter').querySelectorAll('button')) b.classList.toggle('active', b === btn);
-  state.watchFilter = btn.dataset.value;
-  renderResults();
-});
+wireToggle('watch-filter', 'watchFilter', renderResults);
 
-// Click a column header to sort by it; first click ascending, click again to
-// flip to descending. (Color column ascending = green→yellow→red.)
+// Click a column header to sort by it; click again to flip direction. The
+// boolean Watch column seeds descending so the first click does what its
+// tooltip promises (watched rows first) instead of the opposite.
 for (const th of document.querySelectorAll('#results th.sortable')) {
   th.addEventListener('click', () => {
     const col = th.dataset.col;
@@ -394,9 +404,19 @@ for (const th of document.querySelectorAll('#results th.sortable')) {
       state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
     } else {
       state.sortColumn = col;
-      state.sortDir = 'asc';
+      state.sortDir = col === 'watch' ? 'desc' : 'asc';
     }
     renderResults();
+  });
+}
+
+// One debounce helper for every filter input — this block used to be
+// pasted five times with only the id, delay, and assignment differing.
+function wireDebouncedInput(id, ms, apply) {
+  let timer = null;
+  $(id).addEventListener('input', (e) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => apply(e.target.value), ms);
   });
 }
 
@@ -426,31 +446,17 @@ $('grader-filter').addEventListener('change', (e) => {
   loadResults().catch((err) => setError(err.message));
 });
 
-let maxPriceDebounce = null;
-$('max-price').addEventListener('input', (e) => {
-  clearTimeout(maxPriceDebounce);
-  maxPriceDebounce = setTimeout(() => {
-    state.maxPrice = parseFloat(e.target.value) || 0;
-    loadResults().catch((err) => setError(err.message));
-  }, 300);
+wireDebouncedInput('max-price', 300, (v) => {
+  state.maxPrice = parseFloat(v) || 0;
+  loadResults().catch((err) => setError(err.message));
 });
-
-let minDiffDebounce = null;
-$('min-diff').addEventListener('input', (e) => {
-  clearTimeout(minDiffDebounce);
-  minDiffDebounce = setTimeout(() => {
-    state.minDiff = parseFloat(e.target.value) || 0;
-    loadResults().catch((err) => setError(err.message));
-  }, 300);
+wireDebouncedInput('min-diff', 300, (v) => {
+  state.minDiff = parseFloat(v) || 0;
+  loadResults().catch((err) => setError(err.message));
 });
-
-let minPctDiffDebounce = null;
-$('min-pct-diff').addEventListener('input', (e) => {
-  clearTimeout(minPctDiffDebounce);
-  minPctDiffDebounce = setTimeout(() => {
-    state.minPctDiff = parseFloat(e.target.value) || 0;
-    loadResults().catch((err) => setError(err.message));
-  }, 300);
+wireDebouncedInput('min-pct-diff', 300, (v) => {
+  state.minPctDiff = parseFloat(v) || 0;
+  loadResults().catch((err) => setError(err.message));
 });
 
 $('player').addEventListener('change', (e) => {
@@ -459,13 +465,9 @@ $('player').addEventListener('change', (e) => {
 });
 
 // Search filters the already-loaded rows client-side — no refetch needed.
-let searchDebounce = null;
-$('search').addEventListener('input', (e) => {
-  clearTimeout(searchDebounce);
-  searchDebounce = setTimeout(() => {
-    state.search = e.target.value.trim();
-    renderResults();
-  }, 200);
+wireDebouncedInput('search', 200, (v) => {
+  state.search = v.trim();
+  renderResults();
 });
 
 $('sync-btn').addEventListener('click', () => triggerSync(false));
@@ -523,6 +525,9 @@ document.querySelector('#results tbody').addEventListener('change', async (e) =>
     }
     await loadWatches();
     await refreshWatchBadge();
+    // Re-render so the Watched/Unwatched filter and watch-sort reflect the
+    // change immediately (the row used to keep its stale position/state).
+    renderResults();
   } catch (err) {
     setError(err.message);
     cb.checked = !cb.checked;
@@ -596,6 +601,11 @@ const watchLabel = (w) => `${w.card_name} · ${slabLabel(w)}`;
 
 function renderWatches(watches) {
   const tbody = document.querySelector('#watches-table tbody');
+  // Don't destroy an in-progress edit: a finishing check (or the 30s poll)
+  // lands here, and wiping the tbody while the user is typing in a
+  // search-term or Max-$ input silently loses the edit before its change
+  // event ever fires. watchByKey is already updated by the caller.
+  if (tbody.contains(document.activeElement)) return;
   tbody.innerHTML = '';
   for (const w of watches) {
     const tr = document.createElement('tr');
@@ -621,11 +631,20 @@ function renderWatches(watches) {
 // Deal dot: how the asking price sits against the watched grade's CL value.
 // red = already over CL; green = under CL and buyable now; yellow = under CL
 // but an auction (the price can still climb); gray = nothing to compare.
+// Only a real USD figure may be compared or shown as dollars: price_usd is
+// null when FX rates for the currency are unavailable, and falling back to
+// the NATIVE amount made a cheap foreign listing read as "$15,000, above CL
+// value" (and sort as dollars).
+const usdPrice = (m) => m.price_usd ?? (!m.currency || m.currency === 'USD' ? m.price : null);
+
 function dealDot(m) {
-  const price = m.price_usd ?? m.price;
+  const price = usdPrice(m);
   const cl = m.cl_value;
   if (price == null || cl == null) {
-    return { color: 'gray', rank: 3, title: 'No CL value to compare against' };
+    const title = price == null && m.price != null
+      ? 'No USD conversion available for this listing'
+      : 'No CL value to compare against';
+    return { color: 'gray', rank: 3, title };
   }
   if (price > cl) {
     return { color: 'red', rank: 2, title: `Price ${fmtMoney(price)} is above the ${fmtMoney(cl)} CL value` };
@@ -640,7 +659,7 @@ function matchSortValue(m, col) {
   switch (col) {
     case 'deal': return m._deal.rank;
     case 'followed': return m.followed ? 1 : 0;
-    case 'price_usd': return m.price_usd ?? m.price;
+    case 'price_usd': return usdPrice(m);
     case 'ends_at': return m.listing_type === 'auction' ? m.ends_at || null : null; // SQL dates sort lexically
     case 'source': case 'listing_type': return m[col] || '';
     case 'title': return (m.title || '').toLowerCase();
@@ -725,8 +744,9 @@ function renderMatches(viewKey) {
   tbody.innerHTML = '';
   for (const m of matches) {
     const tr = document.createElement('tr');
-    const title = m.url
-      ? `<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>`
+    const href = safeHref(m.url);
+    const title = href
+      ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(m.title)}</a>`
       : esc(m.title);
     const score = m.match_score == null ? '—' : `${Math.round(m.match_score * 100)}%`;
     const low = m.match_score != null && m.match_score < 0.7;
@@ -747,7 +767,7 @@ function renderMatches(viewKey) {
       <td class="listing-title">${title}${m.seller ? `<div class="seller">${esc(m.seller)}</div>` : ''}</td>
       <td class="watch-ref">${watchCardCell(m)}</td>
       <td class="date">${fmtAdded(m.found_at)}</td>
-      <td class="num">${fmtMoney(m.price_usd ?? m.price)}${m.currency && m.currency !== 'USD' ? `<div class="native-price">${esc(String(m.price))} ${esc(m.currency)}</div>` : ''}</td>
+      <td class="num">${fmtMoney(usdPrice(m))}${m.currency && m.currency !== 'USD' ? `<div class="native-price">${esc(String(m.price))} ${esc(m.currency)}</div>` : ''}</td>
       <td class="num cl-value">${fmtMoney(m.cl_value)}</td>
       <td class="num cl-value">${fmtMoney(m.psa_value)}</td>
       <td>${m.listing_type === 'auction' ? 'Auction' : 'Buy It Now'}</td>
@@ -863,7 +883,9 @@ for (const [viewKey, tableId] of [['listings', 'matches-table'], ['following', '
         sort.dir = sort.dir === 'asc' ? 'desc' : 'asc';
       } else {
         sort.col = col;
-        sort.dir = 'asc';
+        // Boolean Follow column seeds descending so the first click puts
+        // followed rows first, as the header tooltip promises.
+        sort.dir = col === 'followed' ? 'desc' : 'asc';
       }
       renderMatches(viewKey);
     });
@@ -991,13 +1013,9 @@ $('hide-following').addEventListener('change', () => renderMatches('listings'));
 
 // Per-table search boxes, same feel as the disparity tab's.
 for (const [viewKey, inputId] of [['listings', 'listing-search'], ['following', 'following-search']]) {
-  let debounce = null;
-  $(inputId).addEventListener('input', (e) => {
-    clearTimeout(debounce);
-    debounce = setTimeout(() => {
-      listingViews[viewKey].search = e.target.value.trim();
-      renderMatches(viewKey);
-    }, 200);
+  wireDebouncedInput(inputId, 200, (v) => {
+    listingViews[viewKey].search = v.trim();
+    renderMatches(viewKey);
   });
 }
 
@@ -1141,6 +1159,11 @@ $('sources-cancel-btn').addEventListener('click', () =>
 
 // --- check-now + status ---
 
+// The finished-run outcome is written to the error banner ONCE per run:
+// re-asserting it on every poll wiped (or stomped) fresher errors from user
+// actions — a failed Max-$ edit vanished within 30 seconds.
+let lastNotedRunId = null;
+
 async function refreshCheckStatus() {
   const s = await api('/api/watch-check/status');
 
@@ -1158,22 +1181,28 @@ async function refreshCheckStatus() {
     const text = `${label}   ·   ${items_processed} / ${items_total} checks`;
     $('check-progress-text').textContent = text;
     $('sources-progress-text').textContent = text;
+    // The Sources tab's per-source counts come from the same run — keep
+    // them live instead of frozen at zeros until the run finishes.
+    if (currentView === 'sources') await loadSourcesView().catch(() => {});
   }
   if (!s.running && s.run) {
     if (s.run.status === 'completed') {
       const failed = s.run.items_failed ? ` · ${s.run.items_failed} failed` : '';
       $('check-info').textContent = `Last checked ${s.run.finished_at} UTC · ${s.run.new_listings} new${failed}`;
-    } else if (s.run.status === 'failed') {
-      setError(`Last check failed: ${s.run.error ?? s.lastError ?? 'unknown error'}`);
     }
-    // Never leave "N failed" unexplained: show the grouped reasons, plus any
-    // source skipped for missing setup.
-    const notes = [
-      ...(s.failures ?? []).map((f) => `${f.source} — ${f.error ?? 'unknown error'} (${f.n} watch${f.n === 1 ? '' : 'es'})`),
-      ...(s.skippedSources ?? []).map((x) => `${x.name} skipped — ${x.reason}`),
-    ];
-    if (notes.length > 0 && s.run.status !== 'failed') setError(notes.join(' · '));
-    else if (notes.length === 0 && s.run.status === 'completed') setError('');
+    if (s.run.id !== lastNotedRunId) {
+      lastNotedRunId = s.run.id;
+      if (s.run.status === 'failed') {
+        setError(`Last check failed: ${s.run.error ?? s.lastError ?? 'unknown error'}`);
+      }
+      // Never leave "N failed" unexplained: show the grouped reasons, plus
+      // any source skipped for missing setup.
+      const notes = [
+        ...(s.failures ?? []).map((f) => `${f.source} — ${f.error ?? 'unknown error'} (${f.n} watch${f.n === 1 ? '' : 'es'})`),
+        ...(s.skippedSources ?? []).map((x) => `${x.name} skipped — ${x.reason}`),
+      ];
+      if (notes.length > 0 && s.run.status !== 'failed') setError(notes.join(' · '));
+    }
   }
   updateBadge(s.newCount);
 

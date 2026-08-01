@@ -8,7 +8,7 @@
 // `npm run test-source pristine "jordan psa 10" --debug`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { saveDebug, debugLog, toNumber, gotoStable, parkPage } from './util.js';
+import { saveDebug, debugLog, toNumber, toIsoDate, gotoStable, parkPage } from './util.js';
 import { searchShopifyShop } from './shopify.js';
 
 const SITE = 'https://www.pristineauction.com';
@@ -62,7 +62,7 @@ export function mapPristineApiLot(o) {
     price,
     currency: 'USD',
     listingType: 'auction',
-    endsAt: typeof ends === 'number' ? new Date(ends > 1e12 ? ends : ends * 1000).toISOString() : ends,
+    endsAt: toIsoDate(ends),
     imageUrl: typeof image === 'string' ? image : null,
     seller: null,
   };

@@ -100,38 +100,47 @@ test('last_sale basis drops cards missing a market value on either side', async 
 });
 
 test('cancel stops the crawl; resume finishes it', async () => {
-  // slow the mock so we can cancel between the SGC and PSA conditions
+  // slow the mock so we can cancel between the SGC and PSA conditions —
+  // inside try/finally so a failed assertion can't leak the slow-mock
+  // setting into every later test in this process.
   process.env.MOCK_PAGE_MS = '600';
-  const { db, q, mgr } = freshManager();
-  await mgr.start({});
-  await sleep(250); // mid-way through the first (SGC) condition
-  assert.equal(mgr.cancel(), true);
-  await waitUntilDone(mgr);
+  try {
+    const { db, q, mgr } = freshManager();
+    await mgr.start({});
+    await sleep(250); // mid-way through the first (SGC) condition
+    assert.equal(mgr.cancel(), true);
+    await waitUntilDone(mgr);
 
-  const run = q.latestSyncRun.get();
-  assert.equal(run.status, 'cancelled');
-  assert.ok(q.pendingSyncItems.all(run.id).length >= 1, 'a condition remains pending after cancel');
+    const run = q.latestSyncRun.get();
+    assert.equal(run.status, 'cancelled');
+    assert.ok(q.pendingSyncItems.all(run.id).length >= 1, 'a condition remains pending after cancel');
 
-  // simulate crash-recovery: the run looks stale/running again
-  db.prepare(`UPDATE sync_runs SET status = 'running', finished_at = NULL WHERE id = ?`).run(run.id);
-  assert.equal(mgr.status().staleRun?.id, run.id);
+    // simulate crash-recovery: the run looks stale/running again
+    db.prepare(`UPDATE sync_runs SET status = 'running', finished_at = NULL WHERE id = ?`).run(run.id);
+    assert.equal(mgr.status().staleRun?.id, run.id);
 
-  delete process.env.MOCK_PAGE_MS; // resume fast
-  await mgr.start({ resume: true });
-  await waitUntilDone(mgr);
-  assert.equal(q.getSyncRun.get(run.id).status, 'completed');
-  assert.equal(q.pendingSyncItems.all(run.id).length, 0);
+    delete process.env.MOCK_PAGE_MS; // resume fast
+    await mgr.start({ resume: true });
+    await waitUntilDone(mgr);
+    assert.equal(q.getSyncRun.get(run.id).status, 'completed');
+    assert.equal(q.pendingSyncItems.all(run.id).length, 0);
 
-  const r = q.resultsQuery(base);
-  assert.equal(r.total, 13);
+    const r = q.resultsQuery(base);
+    assert.equal(r.total, 13);
+  } finally {
+    delete process.env.MOCK_PAGE_MS;
+  }
 });
 
 test('second start while running is rejected with 409', async () => {
   process.env.MOCK_PAGE_MS = '80';
-  const { mgr } = freshManager();
-  await mgr.start({});
-  await assert.rejects(() => mgr.start({}), (err) => err.code === 409);
-  mgr.cancel();
-  await waitUntilDone(mgr);
-  delete process.env.MOCK_PAGE_MS;
+  try {
+    const { mgr } = freshManager();
+    await mgr.start({});
+    await assert.rejects(() => mgr.start({}), (err) => err.code === 409);
+    mgr.cancel();
+    await waitUntilDone(mgr);
+  } finally {
+    delete process.env.MOCK_PAGE_MS;
+  }
 });

@@ -8,9 +8,7 @@
 // since the initial shop list is Canadian).
 
 import { config } from '../../config.js';
-import { fetchWithTimeout } from './util.js';
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+import { fetchWithTimeout, parseShopList, sleep, debugLog } from './util.js';
 
 // Search ONE Shopify storefront; also reused by other adapters whose
 // marketplace side runs on Shopify (e.g. pristinemarketplace.com).
@@ -26,6 +24,7 @@ export async function searchShopifyShop({ domain, currency = 'CAD' }, text) {
     headers: { accept: 'application/json' },
     timeoutMs: 15_000,
   });
+  if (res.status === 429) throw Object.assign(new Error(`${domain} rate limited (429)`), { rateLimited: true });
   if (!res.ok) throw new Error(`${domain} suggest.json HTTP ${res.status} (not a public Shopify storefront?)`);
   const body = await res.json();
   const out = [];
@@ -48,13 +47,7 @@ export async function searchShopifyShop({ domain, currency = 'CAD' }, text) {
 }
 
 export function createShopifySource() {
-  const shops = config.shopifyShops.map((entry) => {
-    const [domain, cur] = entry.split(':');
-    return {
-      domain: domain.replace(/^https?:\/\//, '').replace(/\/+$/, ''),
-      currency: (cur || 'CAD').toUpperCase(),
-    };
-  });
+  const shops = parseShopList(config.shopifyShops);
 
   return {
     name: 'shopify',
@@ -72,15 +65,23 @@ export function createShopifySource() {
     },
 
     async search({ text }) {
+      // Same contract as the WooCommerce source: one shop down must not sink
+      // the rest, but ALL shops down is a real failure — silently returning
+      // [] here read as a successful empty check, and three of those in a
+      // row deleted every tracked (even followed) listing as stale.
       const out = [];
+      const errors = [];
       for (const shop of shops) {
         try {
           out.push(...(await searchShopifyShop(shop, text)));
-        } catch {
-          // one shop down ≠ the source down
+        } catch (err) {
+          if (err.rateLimited) throw err;
+          errors.push(`${shop.domain}: ${err.message}`);
         }
         if (shops.length > 1) await sleep(400);
       }
+      if (errors.length && errors.length === shops.length) throw new Error(errors.join(' · '));
+      if (errors.length) debugLog('shopify', `partial: ${errors.join(' · ')}`);
       return out;
     },
 

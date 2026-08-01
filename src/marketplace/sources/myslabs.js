@@ -49,7 +49,12 @@ export function createMySlabsSource() {
         };
       }).filter(Boolean),
       { site: SITE, listingType }
-    ).catch(() => []);
+    );
+    // No blanket .catch(() => []) here: swallowing "execution context
+    // destroyed" / "target closed" turned real page failures into
+    // successful empty scrapes, which advance the staleness counter and
+    // eventually delete tracked listings. Real errors now reach search()'s
+    // per-venue handler and the run records a failure.
   }
 
   return {

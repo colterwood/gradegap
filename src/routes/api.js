@@ -23,12 +23,18 @@ export function makeApiRouter(db, q, syncManager) {
     });
   });
 
+  // Body: { resume } only. (A playerIds parameter used to be accepted here
+  // and silently ignored — the crawl is always full-catalog, filtered by
+  // config/players.json.)
   router.post('/sync', (req, res) => {
-    const { playerIds = null, resume = false } = req.body ?? {};
+    const { resume = false } = req.body ?? {};
     syncManager
-      .start({ playerIds, resume })
+      .start({ resume })
       .then((runId) => res.json({ ok: true, runId }))
-      .catch((err) => res.status(err.code === 409 ? 409 : 400).json({ ok: false, error: err.message }));
+      .catch((err) => {
+        const code = err.code === 409 ? 409 : err.code === 400 ? 400 : 500;
+        res.status(code).json({ ok: false, error: err.message });
+      });
   });
 
   router.post('/sync/cancel', (_req, res) => {

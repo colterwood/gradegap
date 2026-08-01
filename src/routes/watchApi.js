@@ -8,61 +8,29 @@ import {
   config,
 } from '../config.js';
 import { REGISTRY, resolveSourceNames } from '../marketplace/sources/index.js';
-import { buildQueries, scoreListing } from '../marketplace/match.js';
+import { buildQueries, buildWatchTarget, requiredSurnames, scoreListing } from '../marketplace/match.js';
 
 // The automatic search query for a watch row — same construction the
-// runner uses, so the Watched tab's Search-term placeholder shows exactly
-// what a check would send when no override is set.
-function autoSearch(w) {
-  const target = w.description
-    ? { description: w.description, company: w.grading_company, grade: w.grade }
-    : {
-        playerName: w.player_name ?? w.card_name,
-        year: w.year,
-        setName: w.set_name,
-        cardNumber: w.card_number,
-        parallel: w.parallel,
-        company: w.grading_company,
-        grade: w.grade,
-      };
-  return buildQueries(target).tight;
-}
+// runner uses (buildWatchTarget), so the Watched tab's Search-term
+// placeholder shows exactly what a check would send with no override set.
+const autoSearch = (w) => buildQueries(buildWatchTarget(w)).tight;
 
 // Watch + matches routes, mounted at /api beside makeApiRouter. Same rules:
 // all SQL lives in queries.js, 409 means "already running".
 export function makeWatchRouter(db, q, watchRunner) {
   const router = Router();
 
-  // Scoring target for a watch row, matching what the runner builds so the
-  // UI's candidate list agrees with what a check would decide.
-  const siblingCache = new Map();
-  const siblingsFor = (cardId) => {
-    if (cardId == null) return [];
-    if (!siblingCache.has(cardId)) {
-      siblingCache.set(cardId, q.siblingParallels.all(cardId).map((r) => r.parallel));
-    }
-    return siblingCache.get(cardId);
-  };
-  const watchTarget = (w) =>
-    w.description && w.card_id == null
-      ? { description: w.description, company: w.grading_company, grade: w.grade }
-      : {
-          playerName: w.player_name ?? w.card_name,
-          year: w.year,
-          setName: w.set_name,
-          cardNumber: w.card_number,
-          parallel: w.parallel,
-          company: w.grading_company,
-          grade: w.grade,
-          siblingParallels: siblingsFor(w.card_id),
-        };
-
   // Which watched cards could this listing title belong to, best first.
   // Powers the Watched-card dropdown so a mis-attributed row can be moved
-  // to the right card by hand.
+  // to the right card by hand. The surname pre-gate skips full scoring for
+  // watches whose player can't possibly be in the title (a substring
+  // superset of the hard gate, so it never skips a real candidate) — this
+  // endpoint scores listings × watches and was hundreds of ms of CPU.
   function candidatesFor(title, targets) {
+    const t = String(title ?? '').toLowerCase();
     const out = [];
-    for (const { watch, target, label } of targets) {
+    for (const { watch, target, label, gate } of targets) {
+      if (gate.length > 0 && !gate.some((s) => t.includes(s))) continue;
       const s = scoreListing(target, title);
       if (s.ok) out.push({ watchId: watch.id, label, score: s.score, specificity: s.specificity });
     }
@@ -73,12 +41,22 @@ export function makeWatchRouter(db, q, watchRunner) {
   const slabOf = (w) =>
     w.grading_company === 'None' || w.grade === 'Raw' ? 'Ungraded' : `${w.grading_company} ${w.grade}`;
 
+  // Targets are built fresh per request — including the sibling-parallel
+  // lookups, which a sync can change at any time (a router-lifetime cache
+  // here used to serve pre-sync sibling sets until the server restarted).
   function watchTargets() {
-    return q.listWatchTargets.all().map((w) => ({
-      watch: w,
-      target: watchTarget(w),
-      label: `${w.card_name} · ${slabOf(w)}`,
-    }));
+    const siblingCache = new Map();
+    const siblingsFor = (cardId) => {
+      if (cardId == null) return [];
+      if (!siblingCache.has(cardId)) {
+        siblingCache.set(cardId, q.siblingParallels.all(cardId).map((r) => r.parallel));
+      }
+      return siblingCache.get(cardId);
+    };
+    return q.listWatchTargets.all().map((w) => {
+      const target = buildWatchTarget(w, siblingsFor);
+      return { watch: w, target, gate: requiredSurnames(target), label: `${w.card_name} · ${slabOf(w)}` };
+    });
   }
 
   const VALID_COMPANIES = [BASELINE_COMPANY, ...COMPARE_GRADERS];
@@ -117,8 +95,13 @@ export function makeWatchRouter(db, q, watchRunner) {
     }
     try {
       q.insertWatch.run({ cardId: card, gradingCompany, grade: String(grade), maxPrice: price });
-    } catch {
-      return res.status(400).json({ ok: false, error: 'unknown cardId' });
+    } catch (err) {
+      // Only an FK violation means "unknown cardId" — anything else is a
+      // real server-side failure and must not be misdiagnosed as one.
+      if (String(err?.code ?? '').startsWith('SQLITE_CONSTRAINT')) {
+        return res.status(400).json({ ok: false, error: 'unknown cardId' });
+      }
+      throw err;
     }
     res.json({ ok: true, watch: q.getWatchByKey.get(card, gradingCompany, String(grade)) });
   });
@@ -199,12 +182,13 @@ export function makeWatchRouter(db, q, watchRunner) {
     }
 
     const watchId = Number(raw);
-    const watch = q.getWatch.get(watchId);
+    const watch = q.getWatchTarget.get(watchId);
     if (!watch) return res.status(400).json({ ok: false, error: 'no such watch' });
     // Score the chosen pairing so CL/PSA/Match stay honest; a hand-picked
     // card that doesn't match scores 0, which is information, not an error.
-    const chosen = watchTargets().find((t) => t.watch.id === watchId);
-    const s = chosen ? scoreListing(chosen.target, listing.title) : { score: 0, specificity: 0 };
+    // Built from the by-id query (not the enabled-only target list) so
+    // pinning to a DISABLED watch still scores the real pairing.
+    const s = scoreListing(buildWatchTarget(watch), listing.title);
     q.setListingWatch.run({
       id, watchId, matchScore: s.score, matchSpecificity: s.specificity ?? 0, locked: 1,
     });
@@ -241,7 +225,11 @@ export function makeWatchRouter(db, q, watchRunner) {
   // Per-source dashboard: how the latest run went for each source, what it
   // is holding, and why it is idle (disabled / in 429 backoff / missing
   // setup). Every configured source appears even if it never ran.
-  router.get('/sources', async (_req, res) => {
+  // NOT async: everything here is synchronous better-sqlite3, and on
+  // Express 4 a rejected async handler never reaches the error middleware —
+  // a throw would hang the request instead of returning the 500 the
+  // frontend's catch branch renders.
+  router.get('/sources', (_req, res) => {
     const run = q.latestWatchRun.get() ?? null;
     const stats = new Map((run ? q.watchRunSourceStats.all(run.id) : []).map((r) => [r.source, r]));
     const listings = new Map(q.listingCountsBySource.all().map((r) => [r.source, r.n]));
@@ -290,7 +278,12 @@ export function makeWatchRouter(db, q, watchRunner) {
     watchRunner
       .start({ trigger: 'manual', only })
       .then((runId) => res.json({ ok: true, runId, sources: only }))
-      .catch((err) => res.status(err.code === 409 ? 409 : 400).json({ ok: false, error: err.message }));
+      // Only the runner's own tagged validation failures are client errors;
+      // an unexpected crash (broken adapter import, DB failure) is a 500.
+      .catch((err) => {
+        const code = err.code === 409 ? 409 : err.code === 400 ? 400 : 500;
+        res.status(code).json({ ok: false, error: err.message });
+      });
   });
 
   router.post('/watch-check/cancel', (_req, res) => {

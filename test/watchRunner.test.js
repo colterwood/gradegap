@@ -8,6 +8,10 @@ process.env.NTFY_TOPIC = ''; // pushes disabled: new listings stay status 'new'
 process.env.GMAIL_USER = '';
 process.env.GMAIL_APP_PASSWORD = '';
 process.env.EMAIL_TO = '';
+// Pin the price-drop threshold to its documented default (intEnv parses ''
+// as NaN and falls back to 10). Without this, the boundary assertions below
+// silently test whatever the machine's .env happens to set.
+process.env.FOLLOW_DROP_PCT = '';
 
 const { openDb } = await import('../src/db/db.js');
 const { makeQueries } = await import('../src/db/queries.js');
@@ -110,12 +114,17 @@ test('max_price caps new listings in USD', async () => {
 
 test('second start while running is rejected with 409', async () => {
   process.env.MOCK_MARKET_MS = '300';
-  const { runner } = await freshWatched();
-  await runner.start({});
-  await assert.rejects(() => runner.start({}), (err) => err.code === 409);
-  runner.cancel();
-  await waitUntilDone(runner);
-  delete process.env.MOCK_MARKET_MS;
+  try {
+    const { runner } = await freshWatched();
+    await runner.start({});
+    await assert.rejects(() => runner.start({}), (err) => err.code === 409);
+    runner.cancel();
+    await waitUntilDone(runner);
+  } finally {
+    // finally, not tail code: a failed assertion above must not leak the
+    // slow-mock setting into every later test in this process.
+    delete process.env.MOCK_MARKET_MS;
+  }
 });
 
 test('start with no watches is a 400', async () => {
@@ -214,11 +223,19 @@ test('followed auctions leave the generic reminder and enter the Following one, 
   assert.equal(q.followReminderCandidates.all({ minutes: 1440 }).length, 0);
 });
 
-test('priceDropped: native-currency decreases only', () => {
+test('priceDropped: native-currency decreases of followDropPct or more', () => {
   const fixed = (over) => ({ price: 100, currency: 'USD', ...over });
+  // Exactly 10% (the default threshold) alerts; epsilon absorbs float rounding.
   assert.equal(priceDropped(fixed(), { price: 90, currency: 'USD' }), true);
+  assert.equal(priceDropped(fixed(), { price: 89.99, currency: 'USD' }), true);
+  // Smaller decreases stay silent — a $5 nudge on $100 isn't alert material.
+  assert.equal(priceDropped(fixed(), { price: 95, currency: 'USD' }), false);
+  assert.equal(priceDropped(fixed(), { price: 90.01, currency: 'USD' }), false);
   assert.equal(priceDropped(fixed(), { price: 100, currency: 'USD' }), false);
   assert.equal(priceDropped(fixed(), { price: 110, currency: 'USD' }), false);
+  // Threshold 0 restores alert-on-any-decrease (minus sub-cent noise).
+  assert.equal(priceDropped(fixed(), { price: 99, currency: 'USD' }, 0), true);
+  assert.equal(priceDropped(fixed(), { price: 99.999, currency: 'USD' }, 0), false);
   // FX guard: a currency change is never a "drop", whatever the number says.
   assert.equal(priceDropped(fixed(), { price: 90, currency: 'CAD' }), false);
   // Missing currency defaults to USD on both sides.
@@ -236,9 +253,17 @@ test('a followed Buy It Now re-sighted cheaper is flagged as a price drop', asyn
 
   // Follow the CAD fixed listing, then pretend its stored price predates a
   // seller discount: bump it ABOVE the fixture price so the next re-sighting
-  // (at the fixture's 36,000 CAD) is a decrease.
+  // (at the fixture's 36,000 CAD) is a decrease — exactly the 10% default.
   const cad = q.getListingByKey.get('mockmarket', 'mkt-fixed-cad');
   db.prepare(`UPDATE listings SET followed = 1, price = 40000 WHERE id = ?`).run(cad.id);
+  // Negative gates at the CALL SITE (the unit test only pins the predicate):
+  // an UNFOLLOWED fixed listing with a big drop must not alert…
+  const reprint = q.getListingByKey.get('mockmarket', 'mkt-reprint');
+  db.prepare(`UPDATE listings SET followed = 0, price = 100 WHERE id = ?`).run(reprint.id);
+  // …and neither may a FOLLOWED AUCTION whose current bid re-sights lower
+  // (bids fluctuate; only Buy It Nows are drop material).
+  const auction = q.getListingByKey.get('mockmarket', 'mkt-auction-1');
+  db.prepare(`UPDATE listings SET followed = 1, price = 99999 WHERE id = ?`).run(auction.id);
 
   await runner.start({});
   await waitUntilDone(runner);
@@ -253,6 +278,13 @@ test('a followed Buy It Now re-sighted cheaper is flagged as a price drop', asyn
   assert.equal(q.getListingById.get(cad.id).price, 36000);
 
   // Same price on the NEXT check -> no phantom drop.
+  await runner.start({});
+  await waitUntilDone(runner);
+  assert.equal(runner.status().priceDrops.length, 0);
+
+  // A sub-threshold decrease (36,000 -> 37,000 stored, ~2.7% back down to
+  // 36,000) stays silent — the followDropPct gate applies at the call site.
+  db.prepare(`UPDATE listings SET price = 37000 WHERE id = ?`).run(cad.id);
   await runner.start({});
   await waitUntilDone(runner);
   assert.equal(runner.status().priceDrops.length, 0);
@@ -496,4 +528,135 @@ test('a PSA watch reports its own value as psa_value', async () => {
     assert.ok(r.psa_value != null, 'PSA watch must still resolve a psa_value');
     assert.equal(r.psa_value, r.cl_value);
   }
+});
+
+// --- source-health failAll paths and the exclude filter ---------------------
+
+test('a disabled source fails every item with the disabled reason', async () => {
+  const { db, q, runner } = await freshWatched();
+  q.ensureSourceState.run('mockmarket');
+  db.prepare(`UPDATE source_state SET enabled = 0 WHERE source = 'mockmarket'`).run();
+
+  const runId = await runner.start({});
+  await waitUntilDone(runner);
+
+  const run = q.getWatchRun.get(runId);
+  assert.equal(run.status, 'completed');
+  assert.equal(run.items_failed, run.items_total);
+  const failures = q.watchRunFailures.all(runId);
+  assert.ok(failures.some((f) => /source disabled/.test(f.error)), JSON.stringify(failures));
+});
+
+test('a source in backoff fails the run, then succeeds once the window clears', async () => {
+  const { q, runner } = await freshWatched();
+  q.ensureSourceState.run('mockmarket');
+  q.setSourceBackoff.run('2099-01-01 00:00:00', 'mockmarket');
+
+  const runId = await runner.start({});
+  await waitUntilDone(runner);
+  const failures = q.watchRunFailures.all(runId);
+  assert.ok(failures.some((f) => /backoff until 2099-01-01/.test(f.error)), JSON.stringify(failures));
+
+  q.setSourceBackoff.run(null, 'mockmarket');
+  const runId2 = await runner.start({});
+  await waitUntilDone(runner);
+  assert.equal(q.getWatchRun.get(runId2).items_failed, 0);
+});
+
+test('exclude filters sources; excluding everything is a 400', async () => {
+  const { runner } = await freshWatched();
+  await assert.rejects(() => runner.start({ exclude: ['mockmarket'] }), (err) => err.code === 400);
+});
+
+// --- cross-source concurrency (injected stub sources) -----------------------
+
+const stubSource = (name, { needsBrowser = false, delayMs = 20, onStart, onClose, failWith } = {}) => ({
+  name,
+  needsBrowser,
+  minIntervalMs: 0,
+  async start() { onStart?.(name); },
+  async search() {
+    await sleep(delayMs);
+    if (failWith) throw failWith;
+    return [];
+  },
+  async close() { onClose?.(name); },
+});
+
+test('browser sources honor the tab pool (2) while HTTP sources all run at once', async () => {
+  const { db, q, syncManager } = await (async () => {
+    const f = await freshWatched();
+    return { db: f.db, q: f.q, syncManager: null };
+  })();
+  let activeBrowser = 0;
+  let peakBrowser = 0;
+  const closed = [];
+  const mk = (name, needsBrowser) =>
+    stubSource(name, {
+      needsBrowser,
+      delayMs: 60,
+      onStart: () => {
+        if (needsBrowser) {
+          activeBrowser += 1;
+          peakBrowser = Math.max(peakBrowser, activeBrowser);
+        }
+      },
+      onClose: (n) => {
+        if (needsBrowser) activeBrowser -= 1;
+        closed.push(n);
+      },
+    });
+  const sources = [mk('h1', false), mk('h2', false), mk('b1', true), mk('b2', true), mk('b3', true)];
+  const runner = createWatchRunner(db, q, { sourcesFactory: async () => sources });
+
+  const runId = await runner.start({});
+  await waitUntilDone(runner);
+
+  const run = q.getWatchRun.get(runId);
+  assert.equal(run.status, 'completed');
+  assert.equal(run.items_failed, 0);
+  assert.equal(run.items_processed, run.items_total);
+  // Pool discipline: exactly 2 tabs deep, never 3 — and every source closed.
+  assert.equal(peakBrowser, 2);
+  assert.equal(activeBrowser, 0);
+  assert.deepEqual([...closed].sort(), ['b1', 'b2', 'b3', 'h1', 'h2']);
+});
+
+test('a rate-limited source backs off without poisoning concurrent sources', async () => {
+  const { db, q } = await freshWatched();
+  const sources = [
+    stubSource('limited', { failWith: Object.assign(new Error('429 slow down'), { rateLimited: true }) }),
+    stubSource('healthy', {}),
+  ];
+  const runner = createWatchRunner(db, q, { sourcesFactory: async () => sources });
+
+  const runId = await runner.start({});
+  await waitUntilDone(runner);
+
+  const run = q.getWatchRun.get(runId);
+  assert.equal(run.status, 'completed'); // one bad source never fails the run
+  const stats = new Map(q.watchRunSourceStats.all(runId).map((r) => [r.source, r]));
+  assert.equal(stats.get('limited').failed, 1);
+  assert.equal(stats.get('healthy').done, 1);
+  assert.ok(q.getSourceState.get('limited').backoff_until, 'backoff window was set');
+});
+
+test('cancel() stops all lanes: run ends cancelled, unprocessed items stay pending', async () => {
+  const { db, q, card } = await freshWatched();
+  // Two more watches so each source has several items to walk through.
+  q.insertManualWatch.run({ description: 'cancel probe one', gradingCompany: 'None', grade: 'Raw', maxPrice: null });
+  q.insertManualWatch.run({ description: 'cancel probe two', gradingCompany: 'None', grade: 'Raw', maxPrice: null });
+
+  const closed = [];
+  const sources = [stubSource('slowpoke', { delayMs: 250, onClose: (n) => closed.push(n) })];
+  const runner = createWatchRunner(db, q, { sourcesFactory: async () => sources });
+
+  const runId = await runner.start({});
+  await sleep(100); // mid-first-item
+  assert.equal(runner.cancel(), true);
+  await waitUntilDone(runner);
+
+  assert.equal(q.getWatchRun.get(runId).status, 'cancelled');
+  assert.ok(q.pendingWatchItems.all(runId).length > 0, 'later items were never attempted');
+  assert.deepEqual(closed, ['slowpoke'], 'the started source was still closed');
 });

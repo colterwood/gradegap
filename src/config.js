@@ -11,6 +11,13 @@ function intEnv(name, fallback) {
   return Number.isFinite(v) ? v : fallback;
 }
 
+// For knobs where fractions are meaningful (percent thresholds) — parseInt
+// would silently turn FOLLOW_DROP_PCT=7.5 into 7.
+function floatEnv(name, fallback) {
+  const v = parseFloat(process.env[name]);
+  return Number.isFinite(v) ? v : fallback;
+}
+
 function listEnv(name, fallback) {
   return (process.env[name] ?? fallback).split(',').map((s) => s.trim()).filter(Boolean);
 }
@@ -58,12 +65,13 @@ export const config = {
   // exposing the rest — e.g. "127.0.0.1,100.x.y.z" (your Tailscale IP)
   // keeps localhost working while making the app reachable from your other
   // Tailscale devices, and nothing else.
-  bindHosts: listEnv('BIND_HOST', '127.0.0.1'),
+  // A set-but-empty BIND_HOST would otherwise parse to [] — zero listeners
+  // and a silent exit-0 that looks like the app started and vanished.
+  bindHosts: listEnv('BIND_HOST', '127.0.0.1').length
+    ? listEnv('BIND_HOST', '127.0.0.1')
+    : ['127.0.0.1'],
   headless: process.env.HEADLESS === 'true',
   mock: process.env.MOCK_CL === '1' || process.argv.includes('--mock'),
-  discovery: process.env.DISCOVERY === '1',
-  rateMinMs: intEnv('RATE_MIN_MS', 3000),
-  rateMaxMs: intEnv('RATE_MAX_MS', 7000),
   // Ladder crawl: how many hits to request per page, and the polite delay
   // between page fetches (per PAGE, not per card — the whole point of the
   // bulk crawl). The effective page size auto-adapts if the server caps it.
@@ -80,9 +88,14 @@ export const config = {
   // 'all' = every adapter in the source registry (the default). Sources
   // missing setup are skipped with a reason, so this is safe.
   watchSources: listEnv('WATCH_SOURCES', 'all'),
-  // Checks work through sources in this order — most productive first, so
-  // new listings appear early in a multi-hour run instead of after the
-  // thin auction houses. Unlisted sources run after these, registry order.
+  // How many browser-based sources may drive the shared Chromium at once
+  // during a check. Each source works in its own tab, so 2 roughly halves
+  // the browser half of a run; 1 restores strictly serial tabs. HTTP-API
+  // sources are unaffected — they all run concurrently regardless.
+  watchBrowserConcurrency: intEnv('WATCH_BROWSER_CONCURRENCY', 2),
+  // Browser sources work through this order — most productive first, so
+  // new listings appear early in a long run instead of after the thin
+  // auction houses. Unlisted sources run after these, registry order.
   watchSourceOrder: listEnv(
     'WATCH_SOURCE_ORDER',
     'ebay,fanatics,comc,heritage,goldin,cia,pristine,alt,hibid'
@@ -114,6 +127,10 @@ export const config = {
   // https://myaccount.google.com/apppasswords, requires 2-Step Verification).
   // Any of the three left empty disables email; ntfy still fires.
   followRemindMin: intEnv('FOLLOW_REMIND_MIN', 1440),
+  // Minimum decrease (percent of the old price, native currency) before a
+  // followed listing's re-sighting counts as a price drop worth alerting on.
+  // Small seller nudges stay silent; 0 restores alert-on-any-decrease.
+  followDropPct: floatEnv('FOLLOW_DROP_PCT', 10),
   emailTo: process.env.EMAIL_TO || '',
   gmailUser: process.env.GMAIL_USER || '',
   gmailAppPassword: process.env.GMAIL_APP_PASSWORD || '',

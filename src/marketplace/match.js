@@ -11,6 +11,14 @@
 
 const GRADERS = ['PSA', 'SGC', 'BGS', 'CGC', 'CSG'];
 
+// Generational suffixes stripped when picking a player's required surname.
+const NAME_SUFFIXES = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v']);
+const surnameIdx = (toks) => {
+  let i = toks.length - 1;
+  while (i > 0 && NAME_SUFFIXES.has(toks[i])) i--;
+  return i;
+};
+
 const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Tokens for fuzzy overlap: lowercase, punctuation → space.
@@ -38,6 +46,26 @@ export function splitAliases(name) {
 
 // --- query building --------------------------------------------------------
 
+// The ONE place a watch row (DB shape) becomes a scoring/search target.
+// This used to be copy-pasted in the runner and two API routes and had
+// already drifted; every caller must agree on it or the UI's candidate
+// scores silently disagree with what a check actually stores. `siblingsFor`
+// supplies sibling parallels per card id (callers decide caching).
+export function buildWatchTarget(w, siblingsFor = () => []) {
+  return w.description
+    ? { description: w.description, company: w.grading_company, grade: w.grade }
+    : {
+        playerName: w.player_name ?? w.card_name,
+        year: w.year,
+        setName: w.set_name,
+        cardNumber: w.card_number,
+        parallel: w.parallel,
+        company: w.grading_company,
+        grade: w.grade,
+        siblingParallels: siblingsFor(w.card_id),
+      };
+}
+
 // Search strings for a watch. `tight` leans on the full card identity;
 // `loose` (used when tight finds nothing) drops set/parallel — the fields
 // sellers most often word differently — keeping year + player + number +
@@ -62,7 +90,14 @@ export function buildQueries(target) {
   // Queries carry only the PRIMARY player name — an alias in the query
   // ANDs against listing titles and silently zeroes the results.
   const player = splitAliases(playerName).primary;
-  const tight = [year, setName, player, parallel, slab].filter(Boolean).join(' ').trim();
+  // Catalog-only parallel vocabulary ("Base") never appears in seller
+  // titles, so under AND semantics it zeroes the tight search ("Base /1000"
+  // found nothing anywhere). Send only the words a seller might write.
+  const parallelQ = String(parallel ?? '')
+    .split(/\s+/)
+    .filter((w) => !PARALLEL_STOPWORDS.has(w.replace(/[^a-z0-9]/gi, '').toLowerCase()))
+    .join(' ');
+  const tight = [year, setName, player, parallelQ, slab].filter(Boolean).join(' ').trim();
   const loose = [year, player, cardNumber ? `#${cardNumber}` : null, slab]
     .filter(Boolean)
     .join(' ')
@@ -78,8 +113,11 @@ export function yearRegex(year) {
   const y = String(year);
   const yy = y.slice(2);
   const nextYy = String((Number(yy) + 1) % 100).padStart(2, '0');
+  // The lookbehind stops the bare year matching as the TAIL of a full season
+  // range: "2017-2018 Prizm" is a 2017 card, so it must not satisfy a 2018
+  // watch (the second year of a range was live-verified to leak through).
   return new RegExp(
-    `\\b${y}(?:\\s*[-/]\\s*(?:${nextYy}|${y.slice(0, 2)}${nextYy}))?\\b` +
+    `(?<!\\d\\s*[-/]\\s*)\\b${y}(?:\\s*[-/]\\s*(?:${nextYy}|${y.slice(0, 2)}${nextYy}))?\\b` +
       `|\\b${yy}\\s*[-/]\\s*${nextYy}\\b`,
     'i'
   );
@@ -120,7 +158,7 @@ export function anyGraderRegex(grade) {
 // Named company, any grade — the "Any" grade of a manual watch.
 export function anyGradeRegex(company) {
   return new RegExp(
-    `\\b${esc(company)}[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}(?:\\d{1,2}(?:\\.5)?(?!\\d)|authentic|auth)\\b`,
+    `\\b${esc(company)}[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}(?:\\d{1,2}(?:\\.\\d)?(?!\\d)|authentic|auth)\\b`,
     'i'
   );
 }
@@ -206,6 +244,23 @@ export function parallelFailures(target, titleTokenSet, titleSeq) {
   return out;
 }
 
+// The surnames scoreListing will hard-require of a catalog watch (primary
+// plus multi-token aliases, suffix-stripped). A cheap pre-gate for bulk
+// scoring: when NONE of these appear in a title, full scoring is guaranteed
+// to hard-drop it, so callers scoring listings × watches can skip the call.
+// [] means "no gate" (manual watches, missing names) — always score those.
+export function requiredSurnames(target) {
+  if (target.description || !target.playerName) return [];
+  const { primary, aliases } = splitAliases(target.playerName);
+  const nameTokens = tokenize(primary);
+  if (nameTokens.length === 0) return [];
+  const aliasSurnames = aliases
+    .map((a) => tokenize(a))
+    .filter((t) => t.length >= 2)
+    .map((t) => t[surnameIdx(t)]);
+  return [nameTokens[surnameIdx(nameTokens)], ...aliasSurnames];
+}
+
 export const isUngraded = (company, grade) =>
   String(company ?? '').toLowerCase() === 'none' || String(grade ?? '').toLowerCase() === 'raw';
 
@@ -228,9 +283,12 @@ export function slabMatcher(company, grade) {
 
 // Every "GRADER n" mention in a title (word-label forms included), for
 // wrong-slab penalties and the ungraded test. Built fresh per use: a /g
-// regex carries lastIndex state between calls.
+// regex carries lastIndex state between calls. Any single decimal counts
+// ("CGC 9.8" is a slab even though sports graders only use halves), and
+// "Auth" is a live short form of Authentic — an ungraded watch must reject
+// both.
 const ANY_SLAB_SRC =
-  `\\b(${GRADERS.join('|')})[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}(\\d{1,2}(?:\\.5)?(?!\\d)(?!\\.\\d)|authentic\\b)`;
+  `\\b(${GRADERS.join('|')})[\\s:–-]*(?:${GRADE_WORDS}[\\s.+:–-]*){0,3}(\\d{1,2}(?:\\.\\d)?(?!\\d)|authentic\\b|auth\\b)`;
 const anySlabRe = () => new RegExp(ANY_SLAB_SRC, 'i');
 const anySlabReGlobal = () => new RegExp(ANY_SLAB_SRC, 'gi');
 
@@ -258,15 +316,12 @@ const VARIANT_WORDS = [
   'sticker', 'stickers',
 ];
 
-// Plural-insensitive exemption: a "Panini Stickers" watch must not be
-// penalized for a "... Sticker ..." title (and vice versa). Live data has
-// BOTH spellings as real set/parallel names, so exact-token matching
-// silently pushed correct cards under the 50% visibility cutoff.
-const variantExempt = (targetTokens, w) =>
-  targetTokens.has(w) || targetTokens.has(`${w}s`) || (w.endsWith('s') && targetTokens.has(w.slice(0, -1)));
-
+// The exemption is plural-insensitive via hasToken: a "Panini Stickers"
+// watch must not be penalized for a "... Sticker ..." title (and vice
+// versa) — live data has BOTH spellings as real set/parallel names, and
+// exact-token matching silently pushed correct cards under the 50% cutoff.
 const variantWords = (titleTokens, targetTokens) =>
-  VARIANT_WORDS.filter((w) => titleTokens.has(w) && !variantExempt(targetTokens, w));
+  VARIANT_WORDS.filter((w) => titleTokens.has(w) && !hasToken(targetTokens, w));
 
 // --- scoring ---------------------------------------------------------------
 
@@ -278,7 +333,8 @@ const variantWords = (titleTokens, targetTokens) =>
 // ok=false → hard requirement failed, listing must not be stored.
 export function scoreListing(target, title) {
   const raw = String(title ?? '').toLowerCase();
-  const tokens = new Set(tokenize(raw));
+  const titleSeq = tokenize(raw);
+  const tokens = new Set(titleSeq);
   const matched = [];
   const missing = [];
   const penalties = [];
@@ -288,9 +344,12 @@ export function scoreListing(target, title) {
   if (slab.test(raw)) matched.push(`slab:${slab.label}`);
   else missing.push(`slab:${slab.label}`);
 
-  // -- manual watch: every word typed must appear in the title
+  // -- manual watch: every word typed must appear in the title. Single
+  // DIGITS survive the length filter — "#8" tokenizes to "8", and dropping
+  // it made "... #8" match "... #11" at full confidence (titles write
+  // "#11" as the token "11", so requiring "8" correctly rejects them).
   if (target.description) {
-    const want = tokenize(target.description).filter((t) => t.length >= 2);
+    const want = tokenize(target.description).filter((t) => t.length >= 2 || /^\d$/.test(t));
     const missed = want.filter((t) => !tokens.has(t));
     if (missed.length > 0) missing.push(`words:${missed.join(' ')}`);
     else if (want.length) matched.push(`words:${want.join(' ')}`);
@@ -321,7 +380,12 @@ export function scoreListing(target, title) {
   }
   const { primary, aliases } = splitAliases(target.playerName ?? '');
   const nameTokens = tokenize(primary);
-  const lastName = nameTokens[nameTokens.length - 1];
+  // Generational suffixes are not surnames: a "Ken Griffey Jr." watch must
+  // require "griffey" — sellers routinely omit the Jr., and "jr" as the
+  // required token let any two "... Jr." players in the same year+set
+  // satisfy each other's watches (live-verified both directions).
+  const lastIdx = surnameIdx(nameTokens);
+  const lastName = nameTokens[lastIdx];
   if (lastName) {
     // The title may use either identity: "Abdul-Jabbar" or "Lew Alcindor".
     // ONLY multi-token aliases count as an alternate full name. Most
@@ -335,7 +399,7 @@ export function scoreListing(target, title) {
     const aliasSurnames = aliases
       .map((a) => tokenize(a))
       .filter((t) => t.length >= 2)
-      .map((t) => t[t.length - 1]);
+      .map((t) => t[surnameIdx(t)]);
     const surnames = [lastName, ...aliasSurnames];
     const hit = surnames.find((s) => tokens.has(s));
     if (hit) matched.push(`player:${hit}`);
@@ -351,7 +415,7 @@ export function scoreListing(target, title) {
     missing.push(`set:${setTokens.join(' ')}`);
   }
   // Parallel is identity, same as year/player/set — see parallelFailures.
-  const parFails = parallelFailures(target, tokens, tokenize(raw));
+  const parFails = parallelFailures(target, tokens, titleSeq);
   if (parFails.length > 0) missing.push(...parFails);
   else if (target.parallel) matched.push(`parallel:${target.parallel}`);
   if (missing.length > 0) {
@@ -370,13 +434,15 @@ export function scoreListing(target, title) {
   const set = overlap([target.setName]);
   if (set) parts.push({ label: 'set', weight: 0.4, ...set });
   if (target.cardNumber) {
-    const num = String(target.cardNumber).toLowerCase();
-    const hitNum = tokens.has(num);
-    parts.push({ label: 'number', weight: 0.25, frac: hitNum ? 1 : 0, hit: hitNum ? [num] : [], all: [num] });
+    // Tokenized like the title, so punctuated numbers can actually hit:
+    // "#MJA-2" in a title arrives as tokens "mja","2", and a raw "mja-2"
+    // membership test could never match (nor could " 11" with its padding).
+    const num = overlap([target.cardNumber]);
+    if (num) parts.push({ label: 'number', weight: 0.25, ...num });
   }
   const par = overlap([target.parallel]);
   if (par) parts.push({ label: 'parallel', weight: 0.2, ...par });
-  const first = overlap([nameTokens.slice(0, -1).join(' ')]);
+  const first = overlap([nameTokens.slice(0, lastIdx).join(' ')]);
   if (first) parts.push({ label: 'firstname', weight: 0.15, ...first });
 
   const totalWeight = parts.reduce((s, p) => s + p.weight, 0);

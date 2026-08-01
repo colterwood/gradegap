@@ -257,9 +257,6 @@ PAGE_DELAY_MS=1200
 # 1 = built-in mock data instead of Card Ladder (dev/testing, no account)
 MOCK_CL=
 
-# 1 = dump all captured network traffic to captures/<timestamp>/ during sync
-DISCOVERY=
-
 # ===== Marketplace watcher =====
 
 # Minutes between automatic checks while the server runs. 0 = manual only.
@@ -272,13 +269,28 @@ WATCH_REMIND_MIN=1440
 # Which sources to check. "all" (default) = every adapter — sources missing
 # their setup (eBay without keys, shopify without shops) are skipped with a
 # note, and one broken source never affects the others. Or a comma-separated
-# subset. Available: ebay, shopify, fanatics, comc, goldin, cia, classic,
-# miller, hibid, heritage, myslabs, pristine, catawiki
-# (goldin/hibid/heritage/myslabs/pristine/catawiki OPEN THE BROWSER — they
-# share Sync's Chromium profile and wait while a Card Ladder sync runs.)
+# subset. Available: ebay, shopify, woocommerce, fanatics, comc, goldin,
+# cia, classic, miller, hibid, heritage, myslabs, pristine, catawiki, alt
+# (goldin/hibid/heritage/myslabs/pristine/catawiki/alt OPEN THE BROWSER —
+# they share Sync's Chromium profile and wait while a Card Ladder sync runs.)
 # Verify any source from your machine:
 #   npm run test-source -- <source> "jordan psa 10"
 WATCH_SOURCES=all
+
+# Browser sources work through this many Chromium tabs at once during a
+# check (HTTP sources always all run concurrently). 1 = one tab at a time.
+WATCH_BROWSER_CONCURRENCY=2
+
+# Browser sources run in this order, most productive first, so new listings
+# appear early in a long run. Unlisted sources follow in registry order.
+WATCH_SOURCE_ORDER=ebay,fanatics,comc,heritage,goldin,cia,pristine,alt,hibid
+
+# Fixed wall-clock times for DEDICATED eBay-only runs (24h clock in
+# EBAY_CHECK_TZ, default US Eastern) — e.g. 11:00,21:00. When set, the
+# interval checks skip eBay, making API-quota spend predictable:
+# runs/day × watches × marketplaces. Empty = eBay joins every check.
+EBAY_CHECK_TIMES=
+EBAY_CHECK_TZ=America/New_York
 
 # eBay Browse API — free developer account at https://developer.ebay.com,
 # production keyset: App ID = client id, Cert ID = client secret. Free tier
@@ -307,6 +319,30 @@ WOO_SHOPS=galaxy-auctions.com:CAD
 # Empty = pushes disabled.
 NTFY_TOPIC=
 NTFY_SERVER=https://ntfy.sh
+
+# ===== Following-tab alerts (per-listing, unlike the aggregate pushes) =====
+
+# Lead time (minutes) for the per-item "auction ending soon" alert on
+# listings you Follow. 1440 = 24 hours.
+FOLLOW_REMIND_MIN=1440
+
+# A followed Buy It Now only alerts when its price drops by at least this
+# percent (native currency). 0 = alert on any decrease.
+FOLLOW_DROP_PCT=10
+
+# Email delivery for Following alerts (one digest per check). Uses Gmail
+# SMTP with an App Password (https://myaccount.google.com/apppasswords —
+# NOT your account password; requires 2-Step Verification). Any of the
+# three left empty disables email; ntfy pushes still fire. Verify with
+# `npm run test-email`.
+EMAIL_TO=
+GMAIL_USER=
+GMAIL_APP_PASSWORD=
+
+# Alternate Playwright profile directory for one-off scripts
+# (scripts/testSource.js --scratch-profile), so they don't fight the
+# running check for the ./profile lock.
+PROFILE_DIR=
 ```
 
 ## A note on terms of service

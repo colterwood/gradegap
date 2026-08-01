@@ -7,7 +7,7 @@
 // Verify locally with `npm run test-source alt "jordan psa 10" --debug`.
 
 import { acquireBrowser } from '../../scraper/browserLease.js';
-import { toNumber, saveDebug, debugLog, gotoStable, parkPage } from './util.js';
+import { toNumber, toIsoDate, saveDebug, debugLog, gotoStable, parkPage } from './util.js';
 
 const SITE = 'https://alt.xyz';
 
@@ -21,7 +21,11 @@ const SEARCH_BACKEND_RE = /typesense\.net|\/multi_search|algolia|\/search/i;
 // only counts as search results when every query token appears in its
 // request URL or POST body. Exported for tests.
 export function requestCarriesQuery(url, postData, text) {
-  const haystack = decodeURIComponent(`${url}\n${postData ?? ''}`).toLowerCase();
+  // POST bodies are arbitrary site data — a literal '%' not followed by two
+  // hex digits ("100% authentic") makes decodeURIComponent throw, and one
+  // hostile-shaped analytics body must not sink the whole item.
+  const safeDecode = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+  const haystack = safeDecode(`${url}\n${postData ?? ''}`).toLowerCase();
   const tokens = String(text).toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
   return tokens.length > 0 && tokens.every((t) => haystack.includes(t));
 }
@@ -143,7 +147,7 @@ export function mapAltListing(o) {
     price,
     currency: o.currency ?? 'USD',
     listingType: isAuction ? 'auction' : 'fixed',
-    endsAt: typeof ends === 'number' ? new Date(ends > 1e12 ? ends : ends * 1000).toISOString() : ends,
+    endsAt: toIsoDate(ends),
     imageUrl:
       o.imageUrl ?? o.image ?? o.frontImageUrl ?? o.images?.[0]?.url ?? o.images?.[0] ?? null,
     seller: null, // vault-held; no per-listing seller
