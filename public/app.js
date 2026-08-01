@@ -1206,6 +1206,15 @@ async function refreshCheckStatus() {
   }
   updateBadge(s.newCount);
 
+  // Go 2s-live for ANY run in flight — including scheduled checks the
+  // server started on its own. Without this, a run discovered by the slow
+  // 30s poll never armed the fast poll, so the Sources tab sat stale until
+  // a tab switch. The poll tears itself down below when the run ends.
+  if (s.running && !checkPollTimer) {
+    checkWasRunning = true;
+    checkPollTimer = setInterval(() => refreshCheckStatus().catch(() => {}), 2000);
+  }
+
   if (checkWasRunning && !s.running) {
     clearInterval(checkPollTimer);
     checkPollTimer = null;
@@ -1253,9 +1262,9 @@ $('check-cancel-btn').addEventListener('click', () => api('/api/watch-check/canc
       checkWasRunning = true;
       checkPollTimer = setInterval(() => refreshCheckStatus().catch(() => {}), 2000);
     }
-    setInterval(() => {
-      (currentView === 'watched' ? refreshCheckStatus() : refreshWatchBadge()).catch(() => {});
-    }, 30000);
+    // Full status (not just the badge) on every slow tick, whatever the
+    // view — this is what notices a scheduled run and arms the fast poll.
+    setInterval(() => refreshCheckStatus().catch(() => {}), 30000);
     if (location.hash === '#watched') switchView('watched');
     if (location.hash === '#listings') switchView('listings');
     if (location.hash === '#following') switchView('following');
