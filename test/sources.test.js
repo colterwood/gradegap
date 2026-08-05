@@ -1024,3 +1024,90 @@ test('goldin: ISO end_timestamp survives (every auction had a null end date)', a
   );
   assert.equal(epoch[0].endsAt, new Date(1785722400 * 1000).toISOString());
 });
+
+test('joopiter: labeled bid wins; a bare estimate is not a price', async () => {
+  const { pickJoopiterPrice } = await import('../src/marketplace/sources/joopiter.js');
+  assert.equal(pickJoopiterPrice('Current Bid $1,250 · 12 bids'), 1250);
+  assert.equal(pickJoopiterPrice('Estimate $2,000 – $3,000 Current bid: $950'), 950);
+  // An estimate range with no bid must yield NO price — an estimate posing
+  // as a bid would slip through every max-price cap.
+  assert.equal(pickJoopiterPrice('Estimate $2,000 – $3,000'), null);
+  assert.equal(pickJoopiterPrice('Buy now $500.00'), 500);
+  assert.equal(pickJoopiterPrice('$725'), 725); // unlabeled but unambiguous
+  assert.equal(pickJoopiterPrice('no figures here'), null);
+});
+
+test('joopiter: countdowns and prose close dates become ISO instants', async () => {
+  const { parseJoopiterEnds } = await import('../src/marketplace/sources/joopiter.js');
+  const now = Date.parse('2026-08-01T00:00:00Z');
+  assert.equal(parseJoopiterEnds('Ends in 2d 4h', now), '2026-08-03T04:00:00.000Z');
+  assert.equal(parseJoopiterEnds('Closing in 45m', now), '2026-08-01T00:45:00.000Z');
+  // "Bidding closes March 5, 2026" — end of that day in New York (EST,
+  // -05:00 before the March 8 DST switch).
+  assert.equal(parseJoopiterEnds('Bidding closes March 5, 2026', now), '2026-03-06T04:59:00.000Z');
+  // A "3D" in a title must never read as a three-day countdown — only a
+  // labeled countdown counts.
+  assert.equal(parseJoopiterEnds('Rare 3D printed sculpture', now), null);
+  assert.equal(parseJoopiterEnds('', now), null);
+});
+
+test('joopiter: tiles map to slug-pair ids; sold lots and stub anchors drop', async () => {
+  const { mapJoopiterTile } = await import('../src/marketplace/sources/joopiter.js');
+  const now = Date.parse('2026-08-01T00:00:00Z');
+  const tile = {
+    saleSlug: 'footnotes-collection-of-pharrell-williams',
+    lotSlug: 'nike-vandal-high-canvas-jim-morrison-sneakers',
+    href: 'https://www.joopiter.com/auctions/footnotes-collection-of-pharrell-williams/nike-vandal-high-canvas-jim-morrison-sneakers',
+    title: 'Vandal High Canvas Jim Morrison Sneakers',
+    text: 'Vandal High Canvas Jim Morrison Sneakers Current Bid $3,000 Ends in 1d 2h',
+    img: 'https://cdn.joopiter.com/x.jpg',
+  };
+  const lot = mapJoopiterTile(tile, { listingType: 'auction', now });
+  assert.equal(lot.listingId, 'footnotes-collection-of-pharrell-williams/nike-vandal-high-canvas-jim-morrison-sneakers');
+  assert.equal(lot.canonicalKey, `joopiter:${lot.listingId}`);
+  assert.equal(lot.price, 3000);
+  assert.equal(lot.listingType, 'auction');
+  assert.equal(lot.endsAt, '2026-08-02T02:00:00.000Z');
+  assert.equal(lot.currency, 'USD');
+
+  // No per-tile countdown → the sale-wide close backs it.
+  const backed = mapJoopiterTile({ ...tile, text: 'Current Bid $3,000' },
+    { listingType: 'auction', pageEndsAt: '2026-08-09T03:59:00.000Z', now });
+  assert.equal(backed.endsAt, '2026-08-09T03:59:00.000Z');
+
+  // A closed sale keeps serving lots with "Sold for" — not biddable.
+  assert.equal(mapJoopiterTile({ ...tile, text: 'Sold for $4,500' }, { listingType: 'auction', now }), null);
+  // …but a bare "Sold" inside a TITLE is not a sold marker.
+  const soldOut = mapJoopiterTile({ ...tile, title: 'Sold Out Tour Jacket', text: 'Sold Out Tour Jacket $200' },
+    { listingType: 'fixed', now });
+  assert.equal(soldOut.price, 200);
+  assert.equal(soldOut.endsAt, null); // fixed listings carry no end date
+
+  // Image-only / CTA anchors have no real title.
+  assert.equal(mapJoopiterTile({ ...tile, title: 'Bid' }, { listingType: 'auction', now }), null);
+});
+
+test('joopiter: API-shaped lots map tolerantly (money wrappers, built URLs)', async () => {
+  const { mapJoopiterApiLot } = await import('../src/marketplace/sources/joopiter.js');
+  const lot = mapJoopiterApiLot({
+    id: 812,
+    title: 'Rolex Daytona "John Player Special" Ref. 6241',
+    slug: 'rolex-daytona-john-player-special',
+    auction: { slug: 'the-art-of-time' },
+    currentBid: { amount: 125000, currency: 'USD' },
+    endsAt: '2026-03-05T23:00:00Z',
+  });
+  assert.equal(lot.listingId, '812');
+  assert.equal(lot.price, 125000);
+  assert.equal(lot.endsAt, '2026-03-05T23:00:00.000Z');
+  assert.equal(lot.url, 'https://www.joopiter.com/auctions/the-art-of-time/rolex-daytona-john-player-special');
+
+  // Epoch ends and bare-number prices must survive too.
+  const epoch = mapJoopiterApiLot({ objectID: 'a1', name: 'Audemars Piguet Royal Oak', price: 900, end_time: 1785722400 });
+  assert.equal(epoch.endsAt, new Date(1785722400 * 1000).toISOString());
+  assert.equal(epoch.price, 900);
+
+  // No title or no id → not a lot.
+  assert.equal(mapJoopiterApiLot({ id: 1, currentBid: 5 }), null);
+  assert.equal(mapJoopiterApiLot({ title: 'orphan object' }), null);
+});

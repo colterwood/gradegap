@@ -155,7 +155,8 @@ sub-50% matches are hidden behind a toggle so *you* make the final call
     because the sites block plain clients): `hibid` (HiBid Canada
     aggregator — dozens of Canadian houses in one source, **including HCE
     Auctions**), `heritage`, `myslabs`, `pristine`, `goldin`, `alt`,
-    `catawiki` (EU).
+    `catawiki` (EU), `joopiter` (JOOPITER — Pharrell Williams' auction
+    house; themed sales plus its fixed-price marketplace).
   - **Sites that want an account**: `npm run login-site -- alt.xyz` opens
     the shared browser profile so you can sign in by hand; the session is
     saved in `./profile` and every later check reuses it (same mechanism as
@@ -275,9 +276,10 @@ WATCH_REMIND_MIN=1440
 # their setup (eBay without keys, shopify without shops) are skipped with a
 # note, and one broken source never affects the others. Or a comma-separated
 # subset. Available: ebay, shopify, woocommerce, fanatics, comc, goldin,
-# cia, classic, miller, hibid, heritage, myslabs, pristine, catawiki, alt
-# (goldin/hibid/heritage/myslabs/pristine/catawiki/alt OPEN THE BROWSER —
-# they share Sync's Chromium profile and wait while a Card Ladder sync runs.)
+# cia, classic, miller, hibid, heritage, myslabs, pristine, catawiki, alt,
+# joopiter (goldin/hibid/heritage/myslabs/pristine/catawiki/alt/joopiter
+# OPEN THE BROWSER — they share Sync's Chromium profile and wait while a
+# Card Ladder sync runs.)
 # Verify any source from your machine:
 #   npm run test-source -- <source> "jordan psa 10"
 WATCH_SOURCES=all
